@@ -80,15 +80,9 @@ aics/
 │   ├── routers/               # auth / platform / employees / knowledge
 │   │                          # chat / sessions / playground / testchat / insights
 │   └── static/                # admin.html（控制台）、widget.html（访客挂件）
-├── smoke_test.py              # 真实 HTTP 冒烟
-├── verify_llm.py              # 对话模型真机验证（不编造 / 配置错识别 / 截断）
-├── verify_chat_e2e.py         # 端到端真实对话验证（打印客户实际看到的那句话）
-├── verify_embedding.py        # 向量模型真机验证 + MIN_SCORE 定标
-├── verify_rag_e2e.py          # 真模型端到端检索验证（不依赖云端向量库）
-├── verify_qdrant.py           # Qdrant 真机隔离验证（可重复）
-├── verify_upload.py           # 知识库上传全链路（PDF 中英文 / 扫描件 / 坏文件 / 格式白名单）
-├── verify_testchat.py         # 聊天式 AI 员工测试真机验证（多轮 / 兜底 / 隔离）
-└── tests/                     # 140 项测试：隔离 + 流程 + 边界值 + 模型/库适配层 + 切分 + 解析层
+├── run.py                     # 启动入口
+├── requirements.txt           # 依赖清单
+└── .env.example               # 配置模板（真实密钥不入库）
 ```
 
 ---
@@ -105,8 +99,8 @@ aics/
    忘了传直接报错，不给"漏过滤"留机会；检索结果还会按 tenant_id 二次回查确认。
 4. **越权一律留痕**：拒绝访问写审计日志，平台侧可查。
 
-`tests/test_isolation.py` 覆盖了跨租户读员工/知识库/检索/会话、凭证换租户、
-租户停用后全面封锁等场景。
+隔离由结构性测试覆盖（跨租户读员工/知识库/检索/会话、凭证换租户、
+租户停用后全面封锁等场景）；测试与真机验证脚本随开发环境维护，不随运行仓库分发。
 
 ---
 

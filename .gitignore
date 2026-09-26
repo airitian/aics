@@ -28,3 +28,16 @@ tests/.tmp_assets/
 nul
 _junit.xml
 *.bak*
+
+# ---- 仓库只保留可运行的项目代码；以下随本地开发环境维护，不入库 ----
+tests/
+cmds/
+eval/
+docs/
+pytest.ini
+smoke_test.py
+verify_*.py
+profile_*.py
+migrate_*.py
+交接摘要*.md
+test_nameplate.png
