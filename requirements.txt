@@ -1,0 +1,22 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+SQLAlchemy>=2.0
+pydantic-settings>=2.4
+httpx>=0.27
+PyJWT>=2.8
+python-multipart>=0.0.9
+numpy>=1.26
+pypdf>=4.2
+# 扫描版 PDF 整页渲染（页面级视觉转写兜底，已验证可用版本 1.26.x）
+pymupdf>=1.24
+python-docx>=1.1
+openpyxl>=3.1
+xlrd>=2.0
+pytest>=8.0
+
+# VECTOR_BACKEND=qdrant 时需要（已验证可用版本 1.19.1）
+qdrant-client>=1.9
+
+# 生产可选（按 VECTOR_BACKEND / 数据库选用，不装不影响 db / qdrant 后端运行）
+psycopg[binary]>=3.1        # PostgreSQL（Neon）必装
+# pgvector>=0.2             # VECTOR_BACKEND=pgvector 时需要

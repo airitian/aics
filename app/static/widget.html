@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>访客聊天组件 · AICS</title>
+<style>
+:root{--bg:#0d1117;--panel:#151b23;--line:#26303c;--txt:#e6edf3;--dim:#8b98a8;--accent:#7c5cff}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;display:flex;flex-direction:column}
+header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+header b{font-size:14px}
+input{font:inherit;background:#0b0f14;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:#1b232d;color:var(--txt);padding:8px 14px}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+#chat{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:78%;padding:9px 13px;border-radius:12px;white-space:pre-wrap;word-break:break-word;font-size:14px}
+.msg.visitor{background:#1b232d;align-self:flex-end}
+.msg.ai{background:#1a2333;border:1px solid #22344d;align-self:flex-start}
+.msg.agent{background:#1f2b22;border:1px solid #24402c;align-self:flex-start}
+.msg.system{align-self:center;border:1px dashed var(--line);color:var(--dim);font-size:11px;background:transparent}
+footer{border-top:1px solid var(--line);padding:12px 16px;display:flex;gap:10px}
+footer input{flex:1}
+.badge{font-size:11px;padding:2px 8px;border:1px solid var(--line);border-radius:99px;color:var(--dim)}
+.hits{font-size:11px;color:var(--dim);margin-top:4px}
+#root{height:100%;display:flex;flex-direction:column}
+#setup{padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="setup">
+    <b>访客端预览</b>
+    <input id="key" placeholder="粘贴渠道凭证 X-Widget-Key" style="flex:1;min-width:280px">
+    <input id="visitor" value="visitor-001" style="width:150px" placeholder="访客ID">
+    <button class="primary" onclick="connect()">连接</button>
+    <span class="badge" id="status">未连接</span>
+  </div>
+  <header>
+    <b id="title">—</b>
+    <span class="badge" id="mode">—</span>
+    <span class="badge" id="sid">—</span>
+  </header>
+  <div id="chat"></div>
+  <footer>
+    <input id="msg" placeholder="输入消息后回车发送" onkeydown="if(event.key==='Enter')send()">
+    <button class="primary" onclick="send()">发送</button>
+  </footer>
+</div>
+
+<script>
+let KEY='', VISITOR='visitor-001', SID=null, CONFIG=null;
+
+const params = new URLSearchParams(location.search);
+if (params.get('key')) document.getElementById('key').value = params.get('key');
+if (params.get('visitor')) document.getElementById('visitor').value = params.get('visitor');
+
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function bubble(role, text, extra){
+  const d = document.createElement('div');
+  d.className = 'msg ' + role;
+  d.innerHTML = esc(text) + (extra? '<div class="hits">'+esc(extra)+'</div>' : '');
+  document.getElementById('chat').appendChild(d);
+  document.getElementById('chat').scrollTop = 1e9;
+}
+function setStatus(t, cls){ const e=document.getElementById('status'); e.textContent=t; }
+function showTyping(){
+  let t = document.getElementById('typing');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'typing'; t.className = 'msg ai'; t.textContent = '正在输入…';
+    document.getElementById('chat').appendChild(t);
+  }
+  document.getElementById('chat').scrollTop = 1e9;
+}
+function hideTyping(){ const t = document.getElementById('typing'); if(t) t.remove(); }
+
+async function connect(){
+  KEY = document.getElementById('key').value.trim();
+  VISITOR = document.getElementById('visitor').value.trim() || 'visitor-001';
+  if(!KEY) return alert('请先填写渠道凭证');
+  try{
+    const res = await fetch('/api/chat/widget-config',{headers:{'X-Widget-Key':KEY}});
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.detail||'连接失败');
+    CONFIG = data;
+    document.getElementById('title').textContent = data.tenant_name + ' · ' + data.employee_name;
+    document.getElementById('mode').textContent = data.published? '已发布' : '未发布（建议先发布）';
+    setStatus('已连接');
+    document.getElementById('chat').innerHTML='';
+    bubble('ai', data.greeting);
+    await loadHistory();
+  }catch(e){ setStatus('连接失败'); alert(e.message); }
+}
+
+async function loadHistory(){
+  try{
+    const res = await fetch('/api/chat/history?visitor_id='+encodeURIComponent(VISITOR),{headers:{'X-Widget-Key':KEY}});
+    const data = await res.json();
+    if(!res.ok) return;
+    if (data.session_id){
+      SID = data.session_id;
+      document.getElementById('sid').textContent = '会话 ' + SID.slice(0,8);
+    }
+  }catch(e){}
+}
+
+async function send(){
+  const input = document.getElementById('msg');
+  const text = input.value.trim();
+  if(!text || !KEY) return;
+  input.value='';
+  bubble('visitor', text);
+  showTyping();
+  try{
+    const res = await fetch('/api/chat/message',{method:'POST',
+      headers:{'Content-Type':'application/json','X-Widget-Key':KEY},
+      body:JSON.stringify({message:text, visitor_id:VISITOR, session_id:SID})});
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.detail||('HTTP '+res.status));
+    SID = data.session_id;
+    document.getElementById('sid').textContent = '会话 ' + SID.slice(0,8);
+    document.getElementById('mode').textContent = data.handoff? '已转人工' : 'AI 接待中';
+    if (data.reply) {
+      hideTyping();
+      const extra = (data.hits||[]).length? ('命中 '+data.hits.length+' 个知识片段，最高相关度 '+data.hits[0].score) : (data.degraded? ('降级：'+data.degrade_reason) : '未命中知识片段');
+      // 消息拆分回复：服务端拆好的多条，按配置间隔逐条显示（只给最后一条带命中信息）
+      const interval = Math.max(100, (CONFIG&&CONFIG.split_interval_ms)||800);
+      const segs = (data.segments&&data.segments.length>1)? data.segments : [data.reply];
+      segs.forEach((seg,i)=>{
+        setTimeout(()=>bubble('ai', seg, i===segs.length-1? extra:''), i*interval);
+      });
+    }
+    // reply 为空且未转人工：可能是延迟聚合窗口内的中间请求（回复由最后一条消息的请求返回），保持「正在输入」
+    if (!data.reply && !data.handoff && !data.degraded) { /* keep typing */ }
+    else if (!data.reply) hideTyping();
+    if (data.handoff) bubble('system', '已转入人工队列' + (data.handoff_reason? '（'+data.handoff_reason+'）':''));
+  }catch(e){ hideTyping(); bubble('system','发送失败：'+e.message); }
+}
+</script>
+</body>
+</html>

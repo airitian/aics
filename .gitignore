@@ -1,0 +1,30 @@
+# 本地开发数据库（首次启动自动生成，不入库）
+aics.db
+aics.db-shm
+aics.db-wal
+*.db
+*.db-shm
+*.db-wal
+
+# 密钥与本地配置：.env 含真实端点与密钥，不要提交
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+venv/
+.venv/
+
+# 临时调试产物
+_*.log
+_*.txt
+_*.py
+assets/
+tests/.tmp_assets/
+
+# 本地运行产物
+*.log
+nul
+_junit.xml
+*.bak*

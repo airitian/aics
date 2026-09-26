@@ -1,0 +1,1857 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AICS · 多租户 AI 客服控制台</title>
+<style>
+:root{
+  --bg:#0d1117; --panel:#151b23; --panel-2:#1b232d; --line:#26303c;
+  --txt:#e6edf3; --txt-dim:#8b98a8; --accent:#7c5cff; --accent-2:#2f81f7;
+  --ok:#3fb950; --warn:#d29922; --err:#f85149; --radius:10px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+a{color:var(--accent-2)}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--txt);padding:7px 13px}
+button:hover{border-color:#3a4757}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{background:transparent;border-color:#5b2b2b;color:var(--err)}
+button.ghost{background:transparent}
+button:disabled{opacity:.5;cursor:not-allowed}
+input,select,textarea{font:inherit;background:#0b0f14;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+textarea{min-height:120px;resize:vertical;font-family:var(--mono);font-size:13px;line-height:1.6}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent)}
+label{display:block;font-size:12px;color:var(--txt-dim);margin:10px 0 4px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.grid{display:grid;gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+.card h3{margin:0 0 10px;font-size:14px;letter-spacing:.02em}
+.muted{color:var(--txt-dim)}
+.small{font-size:12px}
+.mono{font-family:var(--mono)}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;border:1px solid var(--line);color:var(--txt-dim)}
+.tag.ok{color:var(--ok);border-color:#20402a}
+.tag.warn{color:var(--warn);border-color:#4a3a12}
+.tag.err{color:var(--err);border-color:#5b2b2b}
+.tag.info{color:var(--accent-2);border-color:#1d3a5c}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--txt-dim);font-weight:500;font-size:12px}
+tr:hover td{background:#101720}
+#app{display:none;height:100%;grid-template-columns:224px 1fr}
+#side{background:#0a0e13;border-right:1px solid var(--line);padding:16px 12px;display:flex;flex-direction:column;gap:4px;overflow:auto}
+#side .brand{font-weight:700;letter-spacing:.06em;margin:4px 8px 14px;font-size:13px;color:#c7d0da}
+#side .brand span{color:var(--accent)}
+.nav{padding:8px 10px;border-radius:8px;color:var(--txt-dim);cursor:pointer;font-size:13px;border:1px solid transparent}
+.nav:hover{background:#121922;color:var(--txt)}
+.nav.active{background:#171f2a;color:var(--txt);border-color:var(--line)}
+#main{overflow:auto;padding:20px 24px 60px}
+#topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap}
+#topbar h1{font-size:18px;margin:0}
+#login{display:none;align-items:center;justify-content:center;height:100%}
+#login .box{width:360px}
+#boot-splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:40;background:var(--bg);color:var(--txt)}
+#boot-splash .loading-spin{width:22px;height:22px;border-width:3px;margin:0}
+#toast{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:99;max-width:420px}
+.toast{background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--accent);padding:10px 14px;border-radius:8px;font-size:13px;white-space:pre-wrap}
+.toast.err{border-left-color:var(--err)}
+.toast.ok{border-left-color:var(--ok)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+.kpi .v{font-size:24px;font-weight:600;margin-top:4px}
+.kpi .k{font-size:12px;color:var(--txt-dim)}
+.split{display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:16px;align-items:start}
+.split3{display:grid;grid-template-columns:minmax(200px,250px) minmax(0,1fr) minmax(330px,400px);gap:16px;align-items:start}
+@media (max-width:1280px){.split3{grid-template-columns:minmax(180px,220px) minmax(0,1fr)}.split3 .tc-col{grid-column:1/-1}}
+.tc-sticky{position:sticky;top:16px}
+.list-item{padding:9px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+.list-item:hover{background:#121922}
+.list-item.active{background:#171f2a;border-color:var(--line)}
+.list-item .t{font-size:13px}
+.list-item .s{font-size:11px;color:var(--txt-dim)}
+.chat{display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow:auto;padding:4px}
+.msg{max-width:82%;padding:8px 12px;border-radius:10px;font-size:13px;white-space:pre-wrap;word-break:break-word}
+.msg.visitor{background:#1b232d;align-self:flex-start}
+.msg.ai{background:#1a2333;align-self:flex-end;border:1px solid #22344d}
+.msg.agent{background:#1f2b22;align-self:flex-end;border:1px solid #24402c}
+.msg.system{align-self:center;background:transparent;border:1px dashed var(--line);color:var(--txt-dim);font-size:11px;max-width:96%}
+/* AI 员工测试页视角与坐席侧相反：测试者扮演访客，「我」在右、AI 在左 */
+.msg.me{background:#1a2333;align-self:flex-end;border:1px solid #22344d}
+.msg.bot{background:#1b232d;align-self:flex-start}
+.tc-chat{max-height:58vh;min-height:320px;border:1px solid var(--line);border-radius:var(--radius);background:#0b0f14;padding:12px}
+details>summary{cursor:pointer;list-style:none}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"▸ "}
+details[open]>summary::before{content:"▾ "}
+.hidden{display:none!important}
+.switch{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px}
+.switch input{width:auto}
+.hint{font-size:11px;color:var(--txt-dim);margin-top:4px}
+.counter{font-size:11px;color:var(--txt-dim);text-align:right}
+.counter.over{color:var(--err)}
+pre{background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:12px;max-height:280px}
+.bar{height:6px;background:#0b0f14;border-radius:99px;overflow:hidden;border:1px solid var(--line)}
+.bar>i{display:block;height:100%;background:var(--accent)}
+/* 人设优化生成弹窗 */
+.modal-mask{position:fixed;inset:0;background:rgba(4,8,14,.6);display:flex;align-items:center;justify-content:center;z-index:60}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;width:min(920px,94vw);max-height:88vh;display:flex;flex-direction:column;padding:16px 20px 14px}
+.modal .tabs{display:flex;gap:20px;border-bottom:1px solid var(--line);margin:10px 0 14px}
+.modal .tab{padding:7px 2px;cursor:pointer;color:var(--txt-dim);font-size:13px;border-bottom:2px solid transparent;margin-bottom:-1px}
+.modal .tab:hover{color:var(--txt)}
+.modal .tab.active{color:var(--txt);border-bottom-color:var(--accent)}
+.chip{display:inline-block;padding:4px 13px;border:1px solid var(--line);border-radius:999px;font-size:12px;cursor:pointer;color:var(--txt-dim);user-select:none}
+.chip:hover{border-color:#3a4757;color:var(--txt)}
+.chip.active{color:var(--accent);border-color:var(--accent);background:rgba(124,92,255,.1)}
+.pm-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;flex:1;overflow:hidden}
+.pm-left{overflow:auto;padding-right:6px;min-height:0}
+.pm-right{border:1px solid var(--line);border-radius:var(--radius);background:#0b0f14;display:flex;flex-direction:column;overflow:hidden}
+.pm-right .pm-head{padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}
+.pm-right .pm-content{flex:1;overflow:auto;padding:12px 14px}
+.pm-empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--txt-dim);gap:10px;font-size:13px}
+.pm-cat{padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--txt-dim);border:1px solid transparent}
+.pm-cat:hover{background:#121922;color:var(--txt)}
+.pm-cat.active{background:#171f2a;color:var(--txt);border-color:var(--line)}
+.pm-tpl{border:1px solid var(--line);border-radius:var(--radius);padding:12px;background:var(--panel-2);font-size:12px;display:flex;flex-direction:column;gap:8px}
+.pm-tpl .t{font-size:13px;font-weight:600}
+.pm-tpl .d{color:var(--txt-dim);flex:1;white-space:pre-wrap;max-height:180px;overflow:hidden}
+@media (max-width:900px){.pm-body{grid-template-columns:1fr}}
+/* 知识库绑定（HelpKnow 风格） */
+.kb-bound{border:1px solid var(--line);border-radius:var(--radius);margin-top:6px;overflow:hidden}
+.kb-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line)}
+.kb-row:last-child{border-bottom:none}
+.kb-row:hover{background:#101720}
+.kb-icon{width:30px;height:30px;border-radius:7px;background:rgba(124,92,255,.15);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+.kb-row .t{font-size:13px}
+.kb-row .s{font-size:11px;color:var(--txt-dim)}
+.kb-row>div:nth-child(2){flex:1;min-width:0}
+.kb-remove{margin-left:auto;color:var(--err);background:transparent;border:1px solid #5b2b2b;border-radius:8px;padding:3px 12px;font-size:12px;flex-shrink:0}
+.kb-remove:hover{border-color:var(--err)}
+.kb-add{margin-left:auto;color:var(--accent-2);background:transparent;border:1px solid #1d3a5c;border-radius:8px;padding:3px 12px;font-size:12px;flex-shrink:0}
+.kb-add:hover{border-color:var(--accent-2)}
+#kb-modal .modal{width:min(560px,94vw)}
+#kb-modal-list{margin-top:8px;overflow:auto;max-height:46vh}
+/* ---- 交互优化：过渡 / 动画 / 拟物开关 / 加载指示 ---- */
+button,.nav,.list-item,.chip,.kb-row,.pm-cat,.pm-tpl,input,select,textarea{transition:background .15s,border-color .15s,color .15s,box-shadow .15s}
+button:hover{box-shadow:0 1px 6px rgba(0,0,0,.25)}
+button:active:not(:disabled){transform:scale(.97)}
+.modal-mask{animation:maskIn .18s ease-out}
+.modal{animation:modalIn .22s cubic-bezier(.2,.9,.3,1.1)}
+@keyframes maskIn{from{opacity:0}to{opacity:1}}
+@keyframes modalIn{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:none}}
+.toast{animation:toastIn .25s ease-out;cursor:pointer}
+@keyframes toastIn{from{opacity:0;transform:translateX(26px)}to{opacity:1;transform:none}}
+.view-in{animation:viewIn .2s ease-out}
+@keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+/* 复选框统一渲染成拨动开关（无需改任何调用方 HTML） */
+input[type=checkbox]{appearance:none;-webkit-appearance:none;width:36px;height:20px;border-radius:999px;background:#232d3a;border:1px solid var(--line);position:relative;cursor:pointer;padding:0;flex-shrink:0}
+input[type=checkbox]::after{content:'';position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#8b98a8;transition:left .18s,background .18s}
+input[type=checkbox]:checked{background:var(--accent);border-color:var(--accent)}
+input[type=checkbox]:checked::after{left:18px;background:#fff}
+input[type=checkbox]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.loading-spin{display:inline-block;width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.msg.typing::after{content:'…';animation:dots 1.2s steps(4,end) infinite}
+@keyframes dots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
+#ask-ok.danger{background:var(--err);border-color:var(--err)}
+/* ---- 字段悬浮提示（问号图标 + 气泡） ---- */
+.tip{position:relative;display:inline-flex;width:15px;height:15px;border-radius:50%;border:1px solid var(--line);color:var(--txt-dim);font-size:10px;line-height:1;align-items:center;justify-content:center;cursor:help;flex-shrink:0;user-select:none;margin-left:2px}
+.tip:hover,.tip:focus-visible{color:var(--accent);border-color:var(--accent)}
+.tip::after{content:attr(data-tip);position:absolute;left:50%;top:calc(100% + 8px);transform:translateX(-50%);background:#1b232d;border:1px solid var(--line);color:var(--txt);padding:7px 10px;border-radius:8px;font-size:12px;line-height:1.55;white-space:normal;width:max-content;max-width:300px;text-align:left;opacity:0;pointer-events:none;transition:opacity .15s;z-index:80;box-shadow:0 6px 18px rgba(0,0,0,.45);font-weight:400}
+.tip::before{content:'';position:absolute;left:50%;top:calc(100% + 3px);transform:translateX(-50%);border:5px solid transparent;border-bottom-color:var(--line);opacity:0;transition:opacity .15s;z-index:80}
+.tip:hover::after,.tip:hover::before,.tip:focus-visible::after,.tip:focus-visible::before{opacity:1}
+</style>
+</head>
+<body>
+
+<div id="boot-splash"><span class="loading-spin"></span><span class="muted small">正在进入控制台…</span></div>
+
+<div id="login">
+  <div class="box card">
+    <h3 style="font-size:16px">AICS 控制台</h3>
+    <p class="muted small">多租户 AI 客服系统</p>
+    <label>邮箱</label>
+    <input id="email" value="star@demo.local" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()">
+    <label>密码</label>
+    <input id="password" type="password" value="demo12345" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+    <div class="row" style="margin-top:14px">
+      <button class="primary" onclick="doLogin()">登录</button>
+      <span class="muted small">演示：star@demo.local / sea@demo.local / admin@aics.local</span>
+    </div>
+    <p class="hint">默认密码 admin12345（平台账号）或 demo12345（演示租户）</p>
+  </div>
+</div>
+
+<div id="app">
+  <aside id="side">
+    <div class="brand">AICS<span>·</span>控制台</div>
+    <div class="nav" data-page="overview">概览</div>
+    <div class="nav" data-page="employees">AI 员工配置</div>
+    <div class="nav" data-page="knowledge">知识库</div>
+    <div class="nav" data-page="playground">问答测试</div>
+    <div class="nav" data-page="usage">用量与配额</div>
+    <div class="nav" data-page="audit">审计日志</div>
+    <div class="nav" data-page="platform" id="nav-platform">平台运营</div>
+    <div style="flex:1"></div>
+    <div class="nav" onclick="logout()">退出登录</div>
+    <div class="small muted" id="whoami" style="padding:8px 10px"></div>
+  </aside>
+  <main id="main">
+    <div id="topbar"><h1 id="page-title">概览</h1><div id="tenant-badge" class="muted small"></div></div>
+    <div id="view"></div>
+  </main>
+</div>
+
+<div id="pmodal-mask" class="modal-mask hidden" onclick="if(event.target===this)closePersonaModal()">
+  <div class="modal">
+    <div class="row" style="justify-content:space-between">
+      <h3 style="margin:0;font-size:15px">人设优化生成</h3>
+      <button class="ghost" onclick="closePersonaModal()" style="padding:2px 10px">✕</button>
+    </div>
+    <div class="tabs">
+      <div class="tab" data-pmtab="generate" onclick="pmSwitch('generate')">生成人设</div>
+      <div class="tab" data-pmtab="optimize" onclick="pmSwitch('optimize')">优化当前人设</div>
+      <div class="tab" data-pmtab="template" onclick="pmSwitch('template')">使用模板</div>
+    </div>
+    <div class="pm-body">
+      <div class="pm-left" id="pm-left"></div>
+      <div class="pm-right">
+        <div class="pm-head">生成人设预览</div>
+        <div class="pm-content" id="pm-preview"></div>
+      </div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px">
+      <button onclick="closePersonaModal()">取消</button>
+      <button class="primary" id="pm-go" onclick="pmGenerate()">智能生成</button>
+    </div>
+  </div>
+</div>
+
+<div id="kb-modal" class="modal-mask hidden" onclick="if(event.target===this)closeDocModal()">
+  <div class="modal">
+    <div class="row" style="justify-content:space-between">
+      <h3 style="margin:0;font-size:15px">选择文件</h3>
+      <span class="row" style="gap:8px;margin:0">
+        <button class="ghost small" onclick="gotoKbPage()" style="padding:3px 10px;color:var(--accent-2)">上传文件</button>
+        <button class="ghost" onclick="closeDocModal()" style="padding:2px 10px">✕</button>
+      </span>
+    </div>
+    <input id="kb-search" placeholder="搜索文件名或知识库名称" oninput="kbSearchInput(this.value)" style="margin-top:10px">
+    <div id="kb-modal-list"></div>
+    <div class="row" style="justify-content:space-between;margin-top:12px">
+      <span class="hint" style="margin:0">新文件请到「知识库」页上传</span>
+      <button class="primary" onclick="closeDocModal()">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="stop-modal" class="modal-mask hidden" onclick="if(event.target===this)closeStopModal(false)">
+  <div class="modal" style="width:min(720px,94vw)">
+    <div class="row" style="justify-content:space-between">
+      <h3 style="margin:0;font-size:15px">自动停止回复</h3>
+      <button class="ghost" onclick="closeStopModal(false)" style="padding:2px 10px">✕</button>
+    </div>
+    <div class="card" style="margin:10px 0;padding:10px 14px;border-color:var(--accent)">
+      <div class="row" style="justify-content:space-between;align-items:center;margin:0">
+        <div style="flex:1">
+          <b>自动停止回复</b> <span class="tip" tabindex="0" data-tip="开启后，可设置触发条件或时间以实现 AI 停止回答">?</span>
+        </div>
+        <input type="checkbox" id="stop-enabled" style="width:38px;height:20px">
+      </div>
+    </div>
+    <div class="tabs">
+      <div class="tab active" id="stop-tab-cond" onclick="switchStopTab('cond')">停止条件设置</div>
+      <div class="tab" id="stop-tab-time" onclick="switchStopTab('time')">停止时间设置</div>
+    </div>
+    <div id="stop-pane-cond" style="overflow:auto;max-height:44vh">
+      <div class="hint">当用户满足以下条件时，AI 将停止回复该用户后续发送的消息；用户生成新的会话时，AI 将正常接待。满足任一条件组即触发；组内条件需同时满足。</div>
+      <div id="stop-groups"></div>
+      <div class="row" style="margin-top:6px"><button class="ghost small" onclick="addStopGroup()">＋ 添加条件组</button></div>
+      <div style="border-top:1px dashed var(--line);margin:14px 0 10px"></div>
+      <label>结束语 <span class="tip" tabindex="0" data-tip="触发停止时先发送该结束语；不填则 AI 直接不作回答">?</span></label>
+      <textarea id="stop-msg" rows="3" maxlength="500" oninput="countStopMsg()" placeholder="请输入结束语，不填则 AI 直接不作回答"></textarea>
+      <div class="counter" id="stopmsg-counter"></div>
+    </div>
+    <div id="stop-pane-time" class="hidden" style="overflow:auto;max-height:44vh">
+      <div class="hint">时段内 AI 不回复该用户后续发送的消息（新会话同样不接待）。结束时间早于开始时间视为跨零点，如 22:00-08:00。</div>
+      <div class="switch" style="margin-bottom:6px"><input type="checkbox" id="stop-time-enabled"><label for="stop-time-enabled" style="margin:0">按停止时间停止（时段内不回复）</label></div>
+      <div id="stop-rules"></div>
+      <div class="row" style="margin-top:4px"><button class="ghost small" onclick="addStopRule()">＋ 添加停止时段</button></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px">
+      <button onclick="closeStopModal(false)">取消</button>
+      <button class="primary" onclick="closeStopModal(true)">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="reply-modal" class="modal-mask hidden" onclick="if(event.target===this)closeReplyModal(false)">
+  <div class="modal" style="width:min(560px,94vw)">
+    <div class="row" style="justify-content:space-between">
+      <h3 style="margin:0;font-size:15px">AI 回复设置</h3>
+      <button class="ghost" onclick="closeReplyModal(false)" style="padding:2px 10px">✕</button>
+    </div>
+    <div style="overflow:auto;max-height:62vh;margin-top:6px">
+      <div class="switch" style="margin:8px 0"><input type="checkbox" id="rp-humanize"><label for="rp-humanize" style="margin:0">拟人回复（语气更像真人客服）</label><span class="tip" tabindex="0" data-tip="开启后自动注入拟人化表达要求；品牌语气、客服身份请在「人设」中补充。">?</span></div>
+
+      <label style="margin-top:6px">AI 延迟回复时间 <span class="tip" tabindex="0" data-tip="每次回复在区间内随机延迟；等待期内客户连发的消息会合并成一条统一回复。0 ~ 0 表示关闭。">?</span></label>
+      <div class="row" style="align-items:center;gap:8px;margin-top:4px">
+        <input id="rp-dmin" type="number" min="0" max="60" step="1" style="width:92px">
+        <span class="muted">~</span>
+        <input id="rp-dmax" type="number" min="0" max="60" step="1" style="width:92px">
+        <span class="muted small">秒</span>
+      </div>
+
+      <div class="switch" style="margin:10px 0 4px"><input type="checkbox" id="rp-split" onchange="paintReplyModal()"><label for="rp-split" style="margin:0">消息拆分回复（长回答分多条发送）</label></div>
+      <div id="rp-split-card" class="card" style="padding:10px 12px;margin:6px 0">
+        <label>最大拆分消息数 (2-5)</label>
+        <input id="rp-splitmax" type="number" min="2" max="5" style="width:110px">
+        <label style="margin-top:8px">拆分消息发送间隔 <span class="tip" tabindex="0" data-tip="每条消息的间隔在区间内随机；拆成多条仍按 1 次回复计费。">?</span></label>
+        <div class="row" style="align-items:center;gap:8px;margin-top:4px">
+          <input id="rp-smin" type="number" min="0.1" max="5" step="0.1" style="width:92px">
+          <span class="muted">~</span>
+          <input id="rp-smax" type="number" min="0.1" max="5" step="0.1" style="width:92px">
+          <span class="muted small">秒</span>
+        </div>
+      </div>
+
+      <div class="switch" style="margin:10px 0 0"><input type="checkbox" id="rp-fallback"><label for="rp-fallback" style="margin:0">兜底回复</label><span class="tip" tabindex="0" data-tip="开启：无法确定答案时用兜底话术回复；关闭：先追问澄清，超过轮次转人工。如需「直接转人工」，请在编辑器「低置信度策略」中选择。">?</span></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px">
+      <button onclick="closeReplyModal(false)">取消</button>
+      <button class="primary" onclick="closeReplyModal(true)">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="ask-modal" class="modal-mask hidden" onclick="if(event.target===this)askCancel()">
+  <div class="modal" style="width:min(460px,94vw)">
+    <h3 id="ask-title" style="margin:0 0 6px;font-size:15px"></h3>
+    <div id="ask-msg" class="small muted" style="white-space:pre-wrap;margin:0 0 6px"></div>
+    <div id="ask-fields"></div>
+    <div id="ask-err" class="hint" style="color:var(--err);display:none;margin-top:6px"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:14px">
+      <button id="ask-cancel" onclick="askCancel()">取消</button>
+      <button class="primary" id="ask-ok" onclick="askOk()">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const S = { token: localStorage.getItem('aics_token') || '', me: null, page: 'overview',
+            employeeId: null, kbId: null, employees: [], kbs: [], meta: null,
+            tcSession: null, tcMsgs: [], tcBusy: false };
+
+function toast(msg, kind){
+  const el = document.createElement('div');
+  el.className = 'toast ' + (kind || '');
+  el.textContent = msg;
+  el.title = '点击关闭';
+  el.onclick = ()=>el.remove();
+  document.getElementById('toast').appendChild(el);
+  setTimeout(()=>el.remove(), kind==='err'?7000:4200);
+}
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+/* 字段悬浮提示图标：tip('说明文字')，悬停 / 键盘聚焦时显示气泡 */
+function tip(text){
+  return '<span class="tip" tabindex="0" data-tip="'+esc(text)+'">?</span>';
+}
+
+/* ---- 统一对话框（替代原生 prompt / confirm）----
+   askText(title, {label,value,placeholder}) -> Promise<string|null>
+   askForm(title, fields[], msg?)            -> Promise<object|null>
+   askConfirm(title, msg, {danger})          -> Promise<boolean> */
+let _ask = null;
+function _openAsk(cfg){
+  return new Promise(res=>{
+    _ask = Object.assign({}, cfg, {resolve: res});
+    document.getElementById('ask-title').textContent = cfg.title || '';
+    const msgEl = document.getElementById('ask-msg');
+    msgEl.textContent = cfg.msg || '';
+    msgEl.style.display = cfg.msg ? '' : 'none';
+    document.getElementById('ask-fields').innerHTML = (cfg.fields||[]).map(f=>`
+      <label>${esc(f.label||'')}</label>
+      <input id="ask-f-${esc(f.key)}" type="${f.type||'text'}" value="${esc(f.value!=null?f.value:'')}"
+             placeholder="${esc(f.placeholder||'')}" autocomplete="off"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();askOk()}">`).join('');
+    const errEl = document.getElementById('ask-err');
+    errEl.style.display = 'none'; errEl.textContent = '';
+    const ok = document.getElementById('ask-ok');
+    ok.textContent = cfg.okText || '确定';
+    ok.classList.toggle('danger', !!cfg.danger);
+    document.getElementById('ask-modal').classList.remove('hidden');
+    const first = document.querySelector('#ask-fields input');
+    if (first){ first.focus(); if (first.select && first.value) first.select(); }
+    else ok.focus();
+  });
+}
+function _askErr(el, msg){
+  el.style.borderColor = 'var(--err)'; el.focus();
+  const errEl = document.getElementById('ask-err');
+  errEl.textContent = msg; errEl.style.display = '';
+  setTimeout(()=>{ el.style.borderColor = ''; }, 1400);
+}
+function askOk(){
+  if (!_ask) return;
+  const vals = {};
+  for (const f of (_ask.fields||[])){
+    const el = document.getElementById('ask-f-' + f.key);
+    if ((f.required !== false) && !String(el.value).trim()) return _askErr(el, '该项为必填');
+    vals[f.key] = el.value;
+  }
+  const r = _ask; _ask = null;
+  document.getElementById('ask-modal').classList.add('hidden');
+  if (r.mode === 'confirm') r.resolve(true);
+  else if ((r.fields||[]).length === 1) r.resolve(vals[r.fields[0].key]);
+  else r.resolve(vals);
+}
+function askCancel(){
+  if (!_ask) return;
+  const r = _ask; _ask = null;
+  document.getElementById('ask-modal').classList.add('hidden');
+  r.resolve(r.mode === 'confirm' ? false : null);
+}
+function askText(title, opts={}){
+  return _openAsk({mode:'form', title, okText:'确定',
+    fields:[{key:'value', label:opts.label||'', value:opts.value||'', placeholder:opts.placeholder||'', type:opts.type||'text'}]});
+}
+function askForm(title, fields, msg){
+  return _openAsk({mode:'form', title, fields, msg, okText:'确定'});
+}
+function askConfirm(title, msg, opts={}){
+  return _openAsk({mode:'confirm', title, msg, okText: opts.okText || (opts.danger?'确认删除':'确定'), danger:!!opts.danger});
+}
+/* Esc 关闭最上层的弹窗 */
+document.addEventListener('keydown', e=>{
+  if (e.key !== 'Escape') return;
+  for (const [id, close] of [
+    ['ask-modal', askCancel],
+    ['reply-modal', ()=>closeReplyModal(false)],
+    ['stop-modal', ()=>closeStopModal(false)],
+    ['kb-modal', closeDocModal],
+    ['pmodal-mask', closePersonaModal],
+  ]){
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains('hidden')){ close(); e.preventDefault(); return; }
+  }
+});
+/* 按钮忙碌态：防止重复点击，给出进行中反馈 */
+async function withBusy(btn, fn, busyText){
+  if (!btn) return fn();
+  if (btn.disabled) return;
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = busyText || '处理中…';
+  try{ return await fn(); }
+  finally{ btn.disabled = false; btn.textContent = old; }
+}
+function bytes(n){ if(!n) return '0 B'; const u=['B','KB','MB','GB']; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(i?1:0)+' '+u[i]; }
+
+async function api(path, opts={}){
+  const headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
+  if (S.token) headers['Authorization'] = 'Bearer ' + S.token;
+  const res = await fetch(path, Object.assign({}, opts, {headers}));
+  let data = null;
+  const text = await res.text();
+  try { data = text ? JSON.parse(text) : null; } catch(e){ data = {detail:text}; }
+  if (res.status === 401) { logout(); throw new Error('登录已过期，请重新登录'); }
+  if (!res.ok) {
+    const d = data && data.detail;
+    throw new Error(typeof d === 'string' ? d : (d ? JSON.stringify(d) : ('HTTP ' + res.status)));
+  }
+  return data;
+}
+
+async function doLogin(){
+  try{
+    const r = await api('/api/auth/login',{method:'POST',body:JSON.stringify({
+      email:document.getElementById('email').value.trim(),
+      password:document.getElementById('password').value})});
+    S.token = r.access_token; localStorage.setItem('aics_token', S.token);
+    await boot();
+  }catch(e){ toast(e.message,'err'); }
+}
+function logout(){
+  S.token=''; localStorage.removeItem('aics_token');
+  document.getElementById('app').style.display='none';
+  document.getElementById('boot-splash').style.display='none';
+  if (window.AUTH_DISABLED){
+    autoLogin().then(ok=>{
+      if(ok){ boot(); return; }
+      toast('自动登录失败，请手动登录','err');
+      document.getElementById('login').style.display='flex';
+    });
+    return;
+  }
+  document.getElementById('login').style.display='flex';
+}
+async function autoLogin(){
+  try{
+    const r = await fetch('/api/auth/auto',{method:'POST'}).then(r=>r.json()).catch(()=>null);
+    if (r && r.access_token){
+      S.token = r.access_token;
+      localStorage.setItem('aics_token', S.token);
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
+
+async function boot(){
+  try{
+    S.me = await api('/api/auth/me');
+    S.meta = await api('/api/meta').catch(()=>null);
+    document.getElementById('boot-splash').style.display='none';
+    document.getElementById('login').style.display='none';
+    document.getElementById('app').style.display='grid';
+    document.getElementById('whoami').textContent = S.me.email + '\n' + S.me.role + (S.me.tenant? ' · '+S.me.tenant.name : '');
+    document.getElementById('tenant-badge').textContent = S.me.tenant ? ('租户：' + S.me.tenant.name + ' ｜ 套餐 ' + S.me.tenant.plan) : '平台账号（可跨租户）';
+    document.getElementById('nav-platform').classList.toggle('hidden', !S.me.is_platform);
+    if (!S.me.tenant) { S.page='platform'; } else { S.page = S.me.is_platform?'platform':'overview'; }
+    // AI 员工是对话链路的核心实体（绑定知识库、置信阈值、模型参数）。
+    // 配置页已移除，这里统一加载一次并选定默认员工 —— 否则知识库绑定与
+    // 两个测试页都拿不到 S.employeeId，会一起失灵。
+    await ensureEmployees();
+    window._bootFails = 0;
+    document.querySelectorAll('.nav[data-page]').forEach(n=>{
+      n.onclick = ()=>{ S.page = n.dataset.page; render(); };
+    });
+    render();
+  }catch(e){
+    window._bootFails = (window._bootFails||0) + 1;
+    if (window._bootFails < 3){ logout(); return; }
+    document.getElementById('app').style.display='none';
+    document.getElementById('boot-splash').style.display='none';
+    document.getElementById('login').style.display='flex';
+    toast('进入控制台失败：'+e.message,'err');
+  }
+}
+
+/* 员工列表的单一来源：配置页移除后，所有页面都从这里取 S.employeeId。 */
+async function ensureEmployees(force){
+  if (!S.me || !S.me.tenant) return [];
+  if (force || !S.employees.length){
+    const r = await api('/api/employees');
+    S.employees = r.items || [];
+  }
+  // 选中的员工可能已被删除/改名，这里做一次存在性校验，避免拿着失效 id 去请求
+  if (!S.employees.some(e=>e.id===S.employeeId)){
+    S.employeeId = (S.employees.find(e=>e.is_default) || S.employees[0] || {}).id || null;
+  }
+  return S.employees;
+}
+
+function setNav(){
+  document.querySelectorAll('.nav[data-page]').forEach(n=>n.classList.toggle('active', n.dataset.page===S.page));
+  const titles = {overview:'概览',employees:'AI 员工配置',knowledge:'知识库',testchat:'AI 员工测试',playground:'问答测试',usage:'用量与配额',audit:'审计日志',platform:'平台运营'};
+  document.getElementById('page-title').textContent = titles[S.page] || '';
+}
+
+async function render(){
+  setNav();
+  const v = document.getElementById('view');
+  const main = document.getElementById('main');
+  const keepScroll = main.scrollTop;
+  v.innerHTML = '<div class="muted small"><span class="loading-spin"></span>加载中…</div>';
+  try{
+    if (S.page==='overview') await viewOverview(v);
+    else if (S.page==='employees') await viewEmployees(v);
+    else if (S.page==='knowledge') await viewKnowledge(v);
+    else if (S.page==='testchat') await viewTestChat(v);
+    else if (S.page==='playground') await viewPlayground(v);
+    else if (S.page==='usage') await viewUsage(v);
+    else if (S.page==='audit') await viewAudit(v);
+    else if (S.page==='platform') await viewPlatform(v);
+    // 重渲染后回到原滚动位置（如列表底部操作不会跳回页首），并做轻量淡入
+    v.classList.remove('view-in'); void v.offsetWidth; v.classList.add('view-in');
+    main.scrollTop = keepScroll;
+  }catch(e){ v.innerHTML = '<div class="card"><b style="color:var(--err)">加载失败</b><p class="small">'+esc(e.message)+'</p></div>'; }
+}
+
+/* ---------------- 概览 ---------------- */
+async function viewOverview(v){
+  const m = S.meta || {};
+  const o = await api('/api/insights/overview?days=7');
+  const u = await api('/api/insights/usage');
+  let cards = '';
+  if (o.empty){
+    cards = '<div class="card"><h3>近 7 天会话</h3><p class="muted">'+esc(o.message)+'</p><p class="hint">没有数据时展示空态，不显示 0%，避免被误读为「效果差」。</p></div>';
+  } else {
+    const t = o.metrics;
+    cards = `<div class="kpis">
+      <div class="kpi"><div class="k">会话总数</div><div class="v">${t.sessions_total}</div></div>
+      <div class="kpi"><div class="k">AI 独立接待</div><div class="v">${t.sessions_ai_only}</div></div>
+      <div class="kpi"><div class="k">转人工</div><div class="v">${t.sessions_handoff}</div></div>
+      <div class="kpi"><div class="k">拦截率</div><div class="v">${t.intercept_rate}%</div></div>
+      <div class="kpi"><div class="k">无命中次数</div><div class="v">${t.no_hit_count}</div></div>
+      <div class="kpi"><div class="k">平均首次响应</div><div class="v">${t.avg_first_response_ms}<span class="small muted"> ms</span></div></div>
+    </div>
+    <p class="hint">${esc(o.sample_hint||('样本量 '+o.sample_size+' 条'))} ｜ 数据更新于 ${esc((o.data_updated_at||'').replace('T',' ').slice(0,19))}</p>`;
+  }
+  const q = u.daily_token_quota ? Math.min(100, u.quota_used_percent) : 0;
+  v.innerHTML = cards + `
+  <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:14px">
+    <div class="card"><h3>本租户用量</h3>
+      <div class="row"><span class="muted small">今日 tokens</span><b>${u.tokens_today}</b><span class="muted small">/ ${u.daily_token_quota}</span></div>
+      <div class="bar" style="margin:8px 0"><i style="width:${q}%"></i></div>
+      <table><thead><tr><th>类型</th><th>调用</th><th>tokens</th></tr></thead><tbody>
+      ${kindRows(u.by_kind||[],'3')}
+      </tbody></table>
+    </div>
+    <div class="card"><h3>运行配置 ${tip('模型凭证由平台集中持有，租户不可见、不可配置')}</h3>
+      <table><tbody>
+      <tr><td>对话模型</td><td>${esc(m.providers?.llm||'-')} <span class="muted">${esc(m.providers?.llm_model||'')}</span></td></tr>
+      <tr><td>备用模型端点</td><td>${m.providers?.llm_fallback_configured? '<span class="tag ok">已配置</span>':'<span class="tag warn">未配置（单点风险）</span>'}</td></tr>
+      <tr><td>向量模型</td><td>${esc(m.providers?.embedding||'-')} <span class="muted">${esc(m.providers?.embedding_model||'')}</span></td></tr>
+      <tr><td>向量库</td><td>${esc(m.providers?.vector_backend||'-')}</td></tr>
+      <tr><td>租户 RPM / 并发</td><td>${esc(String(m.limits?.tenant_rpm))} / ${esc(String(m.limits?.tenant_concurrent))}</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>指标口径（可追溯到定义）</h3>
+    <table><tbody>${Object.entries(o.definitions||{}).map(([k,d])=>`<tr><td style="width:150px">${esc(k)}</td><td class="muted">${esc(d)}</td></tr>`).join('')}</tbody></table>
+  </div>`;
+}
+
+/* ---------------- AI 员工 ---------------- */
+async function viewEmployees(v){
+  const r = await api('/api/employees');
+  S.employees = r.items;
+  if (!S.employeeId && r.items.length) S.employeeId = r.items.find(e=>e.is_default)?.id || r.items[0].id;
+  const kbs = await api('/api/knowledge-bases');
+  S.kbs = kbs.items;
+
+  const e = r.items.find(x=>x.id===S.employeeId);
+  // 右栏对话测试与配置同屏：改完配置马上能验，不用来回切页。
+  await tcEnsureSession();
+  v.innerHTML = `<div class="split3">
+    <div class="card">
+      <h3>AI 员工 <span class="muted small">${r.items.length}/${r.max}</span></h3>
+      ${r.items.map(x=>`<div class="list-item ${x.id===S.employeeId?'active':''}" onclick="S.employeeId='${x.id}';render()">
+        <div class="t">${esc(x.name)} ${x.is_default?'<span class="tag info">默认</span>':''}</div>
+        <div class="s">${x.status==='published'?('已发布 v'+x.published_version):'草稿'} ｜ ${x.kb_ids.length} 个知识库</div>
+      </div>`).join('')}
+      <div class="row" style="margin-top:10px">
+        <button onclick="createEmployee()">新建员工</button>
+        <button class="danger" onclick="deleteEmployee()">删除</button>
+      </div>
+    </div>
+    <div>${e? editorHtml(e) : '<div class="card">还没有 AI 员工</div>'}</div>
+    <div class="tc-col">${tcPanelHtml({sticky:true, title:'对话测试'})}</div>
+  </div>`;
+  await loadTestChat();
+}
+
+function sw(id,label,checked,tipText){
+  return `<div class="switch"><input type="checkbox" id="${id}" ${checked?'checked':''}><label for="${id}" style="margin:0">${label}</label>${tipText?tip(tipText):''}</div>`;
+}
+function editorHtml(e){
+  S.editorDocIds = [...(e.doc_ids||[])];
+  S.stopRules = (e.stop_time_rules||[]).map(r=>({days:[...(r.days||[])], start:r.start||'22:00', end:r.end||'08:00'}));
+  S.stopState = {
+    enabled:!!e.stop_reply_enabled,
+    message:e.stop_reply_message||'',
+    groups:(e.stop_condition_groups||[]).map(g=>Array.isArray(g)?g.map(c=>({type:c.type||'ai_rounds',op:c.op||'gte',value:c.value||3})):[]),
+    timeEnabled:!!e.stop_time_enabled,
+  };
+  S.replyState = {
+    humanize:!!e.humanize_enabled,
+    delayMin:e.reply_delay_min??0,
+    delayMax:e.reply_delay_max??0,
+    split:!!e.split_reply_enabled,
+    splitMax:e.split_reply_max||3,
+    splitMinMs:e.split_interval_min_ms??800,
+    splitMaxMs:e.split_interval_max_ms??800,
+    fallback:e.low_confidence_policy==='fallback',
+    originPolicy:e.low_confidence_policy||'clarify',
+  };
+  setTimeout(()=>{
+    paintDocBound(); paintStopRules(); paintStopSummary(); paintReplySummary();
+    // 编辑器内任何输入/勾选变化 → 防抖自动保存（弹窗里「确定」应用的状态另行显式触发）
+    const card = document.getElementById('emp-editor');
+    if (card){
+      card.addEventListener('input', scheduleAutoSave);
+      card.addEventListener('change', scheduleAutoSave);
+    }
+  }, 0);
+  ensureDocs().then(()=>paintDocBound());
+  return `<div class="card" id="emp-editor">
+    <div class="row" style="justify-content:space-between">
+      <h3 style="margin:0">${esc(e.name)} <span class="tag ${e.status==='published'?'ok':'warn'}">${e.status==='published'?('已发布 v'+e.published_version):'草稿'}</span></h3>
+      <div class="row">
+        <span class="small muted" id="autosave-status"></span>
+        <button class="primary" onclick="publishEmployee(this)">发布</button>
+        <button onclick="loadVersions()">版本</button>
+      </div>
+    </div>
+    <div id="publish-result"></div>
+    <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:12px">
+      <div>
+        <label>名称</label><input id="f-name" value="${esc(e.name)}">
+        <label style="display:flex;justify-content:space-between;align-items:center">人设（system prompt）<button class="ghost small" onclick="openPersonaModal()" style="padding:3px 10px">✨ 人设优化生成</button></label>
+        <textarea id="f-persona" oninput="countPersona()">${esc(e.persona)}</textarea>
+        <div class="counter" id="persona-counter"></div>
+      </div>
+      <div>
+        <label>输出语言</label>
+        <select id="f-lang">${['auto','zh-CN','zh-TW','en','ja','ko','ru','es','pt','fr','de','ar','th','vi','id']
+          .map(l=>`<option value="${l}" ${e.output_language===l?'selected':''}>${l}</option>`).join('')}</select>
+        <label>低置信度策略</label>
+        <select id="f-policy">
+          <option value="clarify" ${e.low_confidence_policy==='clarify'?'selected':''}>先追问澄清，超过轮次转人工</option>
+          <option value="handoff" ${e.low_confidence_policy==='handoff'?'selected':''}>直接转人工</option>
+          <option value="fallback" ${e.low_confidence_policy==='fallback'?'selected':''}>兜底话术回复</option>
+        </select>
+        <div class="row">
+          <div style="flex:1"><label>置信度阈值 (0-100)</label><input id="f-conf" type="number" min="0" max="100" value="${e.confidence_threshold}"></div>
+          <div style="flex:1"><label>澄清轮次 (0-3)</label><input id="f-clarify" type="number" min="0" max="3" value="${e.clarify_rounds}"></div>
+        </div>
+        <div class="row">
+          <div style="flex:1"><label>温度 (0-100)</label><input id="f-temp" type="number" min="0" max="100" value="${e.llm_temperature}"></div>
+          <div style="flex:1"><label>最大输出 tokens</label><input id="f-maxtok" type="number" min="1" max="4096" value="${e.llm_max_tokens}"></div>
+        </div>
+        <label>连续未有效回答阈值 (1-10)</label><input id="f-stop" type="number" min="1" max="10" value="${e.auto_stop_threshold}">
+        ${sw('f-fast','快速模式（速度优先）',e.fast_mode)}
+        ${sw('f-memory','记住客户历史（跨会话连贯服务）',e.memory_enabled,'开启=记住该客户跨会话的历史对话；关闭=仅记住当前会话最近 10 轮')}
+        ${sw('f-autostop','未有效回答自动转人工（连续 N 次未有效回答后转人工）',e.auto_stop_enabled)}
+        ${sw('f-group','群聊回复',e.group_reply_enabled,'依赖企微 / Telegram / WhatsApp 群聊渠道接入；本期为预留开关，渠道接入后生效')}
+        ${sw('f-asr','语音识别',e.asr_enabled)}
+        ${sw('f-time','获取当前时间',e.time_enabled)}
+
+        <label style="margin-top:10px"><b>AI 回复设置</b> <span class="muted small">拟人 / 延迟 / 拆分 / 兜底</span> ${tip('延迟回复：等待期内客户连发的消息会合并成一条统一回复。拆分只对较长回答生效；拆成多条仍按 1 次回复计费。')}</label>
+        <div class="row" style="align-items:center;margin-top:4px">
+          <div style="flex:1"><span class="muted small" id="reply-summary"></span></div>
+          <button class="ghost small" onclick="openReplyModal()">设置</button>
+        </div>
+
+        <label style="margin-top:10px"><b>自动停止回复</b> ${tip('触发后本会话不再回复，新会话自动恢复；与「未有效回答转人工」互相独立')}</label>
+        <div class="row" style="align-items:center;margin-top:4px">
+          <div style="flex:1"><span class="muted small" id="stop-summary"></span></div>
+          <button class="ghost small" onclick="openStopModal()">设置</button>
+        </div>
+
+        <label style="display:flex;justify-content:space-between;align-items:center"><span>知识（AI 的检索范围）${tip('两种用法二选一：① 推荐——到「知识库」页勾选整库，之后新上传的文件自动参与检索；② 这里逐个勾选文件（静态清单，新上传的文件不会自动加入，需要手动勾选）。若两边都勾了，以知识库为准。改动自动保存，「发布」后生效。')}</span>
+          <span class="row" style="gap:6px;margin:0">
+            <button class="ghost small" onclick="gotoKbPage()" style="padding:3px 10px;color:var(--accent-2)">上传文件</button>
+            <button class="ghost small" onclick="openDocModal()" style="padding:3px 10px">＋ 选择文件</button>
+          </span></label>
+        <div id="kb-bound" class="kb-bound"></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <span class="hint" style="margin:0">改动自动保存为草稿；点「发布」并确认后才对线上生效</span></div>
+    <div id="versions" style="margin-top:14px"></div>
+  </div>`;
+}
+function countPersona(){
+  const el = document.getElementById('f-persona'); const c = document.getElementById('persona-counter');
+  const max = S.meta?.limits?.persona_max_chars || 20000;
+  const n = el.value.length;
+  c.textContent = n + ' / ' + max;
+  c.className = 'counter' + (n>=max?' over':'');
+  if (n>max){ el.value = el.value.slice(0,max); c.textContent = max+' / '+max; toast('超出上限已截断至 '+max+' 字符','err'); }
+}
+/* ---------------- 人设优化生成 ---------------- */
+const PM_STYLES = ['友好','自然','柔和','专业','幽默'];
+const PM_LENGTHS = ['简洁','标准','详细'];
+const PM_TEMPLATES = [
+  {cat:'售前咨询与导购', items:[
+    {name:'通用售前导购助手', text:`# 角色
+你是一名专业、耐心、转化能力强的售前导购客服，负责帮助客户了解产品、匹配需求并推动下单。
+
+## 任务目标
+1. 快速理解客户真实需求，主动询问使用场景与预算。
+2. 根据使用场景、预算、偏好推荐合适产品。
+3. 清晰介绍产品卖点、优势、适用人群和注意事项。
+4. 在客户犹豫时，温和引导客户完成购买决策。
+
+## 语言风格
+- 专业不失亲切，避免生硬推销感。
+- 每条回复聚焦一个核心推荐理由。
+
+## 行为约束
+- 只依据知识库内容回答；知识库没有的信息如实告知并建议联系人工，绝不编造。
+- 不承诺知识库以外的优惠、赠品或时效。`},
+    {name:'高转化产品推荐助手', text:`# 角色
+你是一名擅长提升成交转化的销售顾问，负责根据客户需求进行产品推荐、卖点讲解和下单引导。
+
+## 任务目标
+1. 判断客户处于哪个购买阶段：了解中、比较中、犹豫中、准备下单。
+2. 根据客户阶段调整回复方式：了解中讲价值，比较中讲差异，犹豫中讲保障。
+3. 用客户听得懂的语言，把产品功能转化为用户利益。
+
+## 语言风格
+- 自信、有推动力，但不给客户压迫感。
+- 善用对比和场景化描述。
+
+## 行为约束
+- 只依据知识库内容回答，绝不编造产品参数、价格或库存。
+- 客户明确拒绝时不纠缠，礼貌收尾并留下再次咨询的入口。`},
+  ]},
+  {cat:'售后服务与支持', items:[
+    {name:'通用售后支持助手', text:`# 角色
+你是一名细致可靠的售后客服，负责处理订单查询、物流跟踪、退换货与使用问题。
+
+## 任务目标
+1. 先确认订单信息与问题现象，再给出解决方案。
+2. 按标准流程指引客户操作，一次讲清步骤。
+3. 无法在线解决的问题，明确告知转人工并说明原因。
+
+## 语言风格
+- 沉稳、有条理，先安抚情绪再解决问题。
+- 步骤用编号列出，便于客户照做。
+
+## 行为约束
+- 只依据知识库内容回答；政策类问题（退换货时限、运费规则）严格按知识库口径，绝不承诺额外补偿。
+- 涉及金额、纠纷、投诉升级时主动转人工。`},
+    {name:'技术排障支持助手', text:`# 角色
+你是一名耐心的技术支持客服，负责帮助客户排查和解决产品使用中的技术问题。
+
+## 任务目标
+1. 先了解设备型号、现象和已尝试的操作，再给方案。
+2. 排查步骤从简到繁，每轮只让客户做一件事并等待反馈。
+3. 确认为硬件故障或超出远程解决范围时，指引售后渠道。
+
+## 语言风格
+- 通俗易懂，避免堆砌术语；必须用术语时附带解释。
+- 每条回复只包含一个操作步骤。
+
+## 行为约束
+- 只依据知识库内容回答，不猜测故障原因，不指导危险操作（拆机、改电路等）。
+- 连续两轮排查无效时建议转人工。`},
+  ]},
+  {cat:'线索收集', items:[
+    {name:'线索收集与筛选助手', text:`# 角色
+你是一名专业的线索收集客服，负责在对话中自然地了解客户背景、需求与联系方式。
+
+## 任务目标
+1. 通过提问了解客户的业务场景、规模和痛点。
+2. 在客户获得价值感之后再请求联系方式，不生硬索要。
+3. 按知识库口径初步判断客户意向等级。
+
+## 语言风格
+- 像顾问式沟通，每轮最多问一个问题。
+- 先给建议或答案，再顺势提问。
+
+## 行为约束
+- 只依据知识库内容回答，绝不编造产品或报价信息。
+- 客户不愿留联系方式时不反复追问，正常继续服务。`},
+    {name:'B2B 询盘接待助手', text:`# 角色
+你是一名 B2B 询盘接待客服，负责接待企业客户咨询、了解采购需求并推动留资。
+
+## 任务目标
+1. 了解采购品类、数量、频次与交付要求。
+2. 按知识库口径介绍合作模式与起订条件。
+3. 引导客户留下联系方式或发起正式询价。
+
+## 语言风格
+- 简洁、高效、商务感强，不闲聊。
+- 数字和信息用列表呈现。
+
+## 行为约束
+- 价格、账期、资质只按知识库口径回复，具体报价引导人工对接，绝不自行报价。
+- 只依据知识库内容回答，绝不编造。`},
+  ]},
+  {cat:'服务预约', items:[
+    {name:'预约登记助手', text:`# 角色
+你是一名高效亲切的预约客服，负责帮助客户完成服务预约、改期与取消。
+
+## 任务目标
+1. 收集预约所需信息：服务类型、期望时间、联系方式。
+2. 按知识库口径确认可约时段并复述确认信息。
+3. 改期与取消先核对原有预约，再按规则办理。
+
+## 语言风格
+- 简洁清楚，关键信息（时间、地点、联系人）完整复述一遍。
+- 语气轻快有礼貌。
+
+## 行为约束
+- 可约时段、取消规则只依据知识库回答，绝不口头放宽或编造时段。
+- 涉及加急、特殊安排时转人工处理。`},
+  ]},
+  {cat:'其它', items:[
+    {name:'品牌忠诚客服', text:`# 角色
+你是{{店铺名}}的资深客服，像一位懂行的老朋友：热情、专业且有亲和力地与客户互动，提供产品咨询和购买指引。
+
+## 任务目标
+1. 让每位客户都感到被认真对待。
+2. 准确回答产品与售后问题。
+3. 主动提醒客户可能关心的注意事项。
+
+## 语言风格
+- 口语化、有温度，可用适当表情符号但每条不超过 2 个。
+- 回复简短直接。
+
+## 行为约束
+- 只依据知识库内容回答，绝不编造。
+- 遇到情绪激动的客户先共情安抚。`},
+    {name:'内部知识问答助手', text:`# 角色
+你是一名内部知识问答助手，面向员工回答公司制度、流程与产品知识。
+
+## 任务目标
+1. 依据知识库精准回答问题，并注明依据来源文档。
+2. 知识库未覆盖时明确说明并指引对应负责人。
+3. 对模糊问题先澄清再回答。
+
+## 语言风格
+- 准确、简洁，先给结论再给依据。
+- 政策条款原文引用时保持原文不动。
+
+## 行为约束
+- 只依据知识库内容回答，绝不推断或编造制度条款。
+- 涉及薪酬、人事处分等敏感话题一律转人工。`},
+  ]},
+];
+S.pm = { tab:'generate', style:'', length:'', cat:0, preview:'', busy:false };
+
+function openPersonaModal(){
+  const cur = document.getElementById('f-persona');
+  S.pm.tab = (cur && cur.value.trim()) ? 'optimize' : 'generate';
+  S.pm.preview = ''; S.pm.style = ''; S.pm.length = '';
+  document.getElementById('pmodal-mask').classList.remove('hidden');
+  renderPm();
+}
+function closePersonaModal(){ document.getElementById('pmodal-mask').classList.add('hidden'); }
+function pmSwitch(tab){ S.pm.tab = tab; renderPm(); }
+function pmChip(kind, val){
+  S.pm[kind] = S.pm[kind]===val ? '' : val;
+  renderPm();
+}
+function pmChipsHtml(){
+  const chip = (kind, v) => `<span class="chip ${S.pm[kind]===v?'active':''}" onclick="pmChip('${kind}','${v}')">${v}</span>`;
+  return `<label style="margin-top:14px"><b>快捷设定（可选）</b></label>
+    <label style="margin-top:6px">语气风格</label>
+    <div class="row" style="gap:8px">${PM_STYLES.map(v=>chip('style',v)).join('')}</div>
+    <label style="margin-top:8px">回复长度</label>
+    <div class="row" style="gap:8px">${PM_LENGTHS.map(v=>chip('length',v)).join('')}</div>`;
+}
+function renderPm(){
+  document.querySelectorAll('[data-pmtab]').forEach(t=>t.classList.toggle('active', t.dataset.pmtab===S.pm.tab));
+  const left = document.getElementById('pm-left');
+  const go = document.getElementById('pm-go');
+  go.classList.toggle('hidden', S.pm.tab==='template');
+  if (S.pm.tab==='generate'){
+    left.innerHTML = `<label style="display:flex;justify-content:space-between"><span><span style="color:var(--err)">*</span> 您希望AI员工做什么</span><span class="counter" id="pm-desc-counter"></span></label>
+      <textarea id="pm-desc" rows="7" maxlength="2000" oninput="pmCount('pm-desc','pm-desc-counter',2000)" placeholder="例如：负责售前咨询，根据客户需求推荐商品，提升购买体验"></textarea>
+      ${pmChipsHtml()}`;
+    pmCount('pm-desc','pm-desc-counter',2000);
+  } else if (S.pm.tab==='optimize'){
+    const cur = document.getElementById('f-persona');
+    left.innerHTML = `<label style="display:flex;justify-content:space-between"><span><span style="color:var(--err)">*</span> 待优化提示词（可编辑）</span><span class="counter" id="pm-cur-counter"></span></label>
+      <textarea id="pm-current" rows="9" style="min-height:180px">${esc(cur?cur.value:'')}</textarea>
+      <label style="display:flex;justify-content:space-between"><span>优化要求（可选）</span><span class="counter" id="pm-note-counter"></span></label>
+      <textarea id="pm-note" rows="2" maxlength="1000" oninput="pmCount('pm-note','pm-note-counter',1000)" placeholder="例如：希望更专业、回答更简洁、语气更自然"></textarea>
+      ${pmChipsHtml()}`;
+    pmCount('pm-current','pm-cur-counter',S.meta?.limits?.persona_max_chars||20000);
+    pmCount('pm-note','pm-note-counter',1000);
+  } else {
+    left.innerHTML = `<div style="display:grid;grid-template-columns:130px minmax(0,1fr);gap:12px;align-items:start">
+      <div>${PM_TEMPLATES.map((c,i)=>`<div class="pm-cat ${i===S.pm.cat?'active':''}" onclick="pmCat(${i})">${esc(c.cat)}</div>`).join('')}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">
+        ${PM_TEMPLATES[S.pm.cat].items.map((t,i)=>`<div class="pm-tpl">
+          <div class="t">${esc(t.name)}</div>
+          <div class="d">${esc(t.text.slice(0,220))}${t.text.length>220?'…':''}</div>
+          <div style="text-align:right"><button class="ghost small" onclick="pmUseTemplate(${S.pm.cat},${i})">使用</button></div>
+        </div>`).join('')}
+      </div></div>`;
+  }
+  renderPmPreview();
+}
+function pmCat(i){ S.pm.cat = i; renderPm(); }
+function pmCount(inputId, counterId, max){
+  const el = document.getElementById(inputId), c = document.getElementById(counterId);
+  if (el && c){ const n = el.value.length; c.textContent = n + ' / ' + max; c.className = 'counter' + (n>=max?' over':''); }
+}
+function renderPmPreview(){
+  const box = document.getElementById('pm-preview');
+  if (!S.pm.preview){
+    box.innerHTML = `<div class="pm-empty"><div style="font-size:34px">📝</div><div>点击下方「智能生成」完成人设<br>或在「使用模板」页直接选用</div></div>`;
+    return;
+  }
+  box.innerHTML = `<textarea id="pm-preview-text" style="min-height:100%;height:100%;border:none;background:transparent;resize:none" oninput="S.pm.preview=this.value">${esc(S.pm.preview)}</textarea>
+    <div class="row" style="justify-content:flex-end;padding-top:8px;border-top:1px solid var(--line)">
+      <span class="muted small" id="pm-preview-counter"></span>
+      <button class="primary" onclick="pmApply()">应用到人设</button>
+    </div>`;
+  const el = document.getElementById('pm-preview-text');
+  const max = S.meta?.limits?.persona_max_chars||20000;
+  document.getElementById('pm-preview-counter').textContent = el.value.length + ' / ' + max;
+}
+function pmUseTemplate(cat, idx){
+  S.pm.preview = PM_TEMPLATES[cat].items[idx].text;
+  renderPm();
+  document.querySelector('.pm-right .pm-head').textContent = '模板预览：' + PM_TEMPLATES[cat].items[idx].name;
+}
+async function pmGenerate(){
+  if (S.pm.busy) return;
+  const body = { mode: S.pm.tab==='optimize' ? 'optimize' : 'generate',
+    style: S.pm.style, length: S.pm.length, output_language: 'zh-CN' };
+  if (S.pm.tab==='optimize'){
+    body.current_persona = document.getElementById('pm-current').value;
+    body.optimize_note = document.getElementById('pm-note').value;
+    if (!body.current_persona.trim()) return toast('当前人设为空，请切到「生成人设」','err');
+  } else {
+    body.description = document.getElementById('pm-desc').value;
+    if (!body.description.trim()) return toast('请先填写「您希望AI员工做什么」','err');
+  }
+  S.pm.busy = true;
+  const go = document.getElementById('pm-go'); go.disabled = true; go.textContent = '生成中…';
+  document.getElementById('pm-preview').innerHTML = `<div class="pm-empty"><div style="font-size:34px">⏳</div><div>正在生成人设，通常需要 5~15 秒…</div></div>`;
+  try{
+    const r = await api('/api/employees/persona-draft', {method:'POST', body: JSON.stringify(body)});
+    S.pm.preview = r.persona;
+    renderPm();
+    document.querySelector('.pm-right .pm-head').textContent = '生成人设预览';
+    toast('人设已生成（'+r.tokens+' tokens），确认无误后点「应用到人设」','ok');
+  }catch(e){
+    renderPm();
+    toast('生成失败：'+e.message,'err');
+  }finally{
+    S.pm.busy = false; go.disabled = false; go.textContent = '智能生成';
+  }
+}
+function pmApply(){
+  const el = document.getElementById('f-persona');
+  if (!el) return toast('请先打开某个 AI 员工的编辑页','err');
+  el.value = S.pm.preview;
+  countPersona();
+  closePersonaModal();
+  scheduleAutoSave();
+  toast('已填入人设并自动保存，「发布」后生效','ok');
+}
+function collectEmployee(){
+  return { name:document.getElementById('f-name').value.trim(),
+    persona:document.getElementById('f-persona').value,
+    output_language:document.getElementById('f-lang').value,
+    confidence_threshold:+document.getElementById('f-conf').value,
+    clarify_rounds:+document.getElementById('f-clarify').value,
+    llm_temperature:+document.getElementById('f-temp').value,
+    llm_max_tokens:+document.getElementById('f-maxtok').value,
+    auto_stop_threshold:+document.getElementById('f-stop').value,
+    fast_mode:document.getElementById('f-fast').checked,
+    memory_enabled:document.getElementById('f-memory').checked,
+    auto_stop_enabled:document.getElementById('f-autostop').checked,
+    group_reply_enabled:document.getElementById('f-group').checked,
+    asr_enabled:document.getElementById('f-asr').checked,
+    time_enabled:document.getElementById('f-time').checked,
+    humanize_enabled:!!(S.replyState&&S.replyState.humanize),
+    reply_delay_min:(S.replyState&&S.replyState.delayMin)||0,
+    reply_delay_max:(S.replyState&&S.replyState.delayMax)||0,
+    reply_delay_seconds:(S.replyState&&S.replyState.delayMax)||0,
+    split_reply_enabled:!!(S.replyState&&S.replyState.split),
+    split_reply_max:(S.replyState&&S.replyState.splitMax)||3,
+    split_interval_min_ms:(S.replyState&&S.replyState.splitMinMs)||800,
+    split_interval_max_ms:(S.replyState&&S.replyState.splitMaxMs)||800,
+    split_reply_interval_ms:(S.replyState&&S.replyState.splitMinMs)||800,
+    low_confidence_policy:document.getElementById('f-policy').value,
+    stop_reply_enabled:!!(S.stopState&&S.stopState.enabled),
+    stop_reply_rounds:0,
+    stop_condition_groups:((S.stopState&&S.stopState.groups)||[]).map(g=>g.map(c=>({type:c.type,op:c.op||'gte',value:c.value}))),
+    stop_reply_message:(S.stopState&&S.stopState.message)||'',
+    stop_time_enabled:!!(S.stopState&&S.stopState.timeEnabled),
+    stop_time_rules:S.stopRules||[],
+    // 不要带 kb_ids：PATCH 是「传了才覆盖」，带空数组会把知识库页勾选的库级绑定清掉，
+    // 结果 AI 只剩文件级绑定（静态快照），新上传的文档永远检索不到。
+    // 库级绑定只由知识库页的「AI 客服启用」开关负责。
+    doc_ids:(S.editorDocIds||[]).slice() };
+}
+
+/* ---- 文件级绑定（HelpKnow 风格：内联列表 + 选择弹窗） ---- */
+const DOC_STATUS = {success:'已就绪', partial:'部分成功', failed:'失败', processing:'处理中', pending:'排队中'};
+async function ensureDocs(force){
+  if(S.docAll && !force) return;
+  try{ S.docAll = (await api('/api/documents')).items; }
+  catch(e){ if(!S.docAll) S.docAll = []; }
+}
+function _docInfo(id){
+  const d = (S.docAll||[]).find(x=>x.id===id);
+  if(!d) return {name:'已删除文件 '+id.slice(0,8), sub:'关联数据缺失'};
+  const st = DOC_STATUS[d.status] || d.status || '';
+  const chunks = d.chunk_count>0 ? (d.chunk_count+' 段') : '';
+  return {name:d.filename, sub:[d.kb_name||'默认知识库', st, chunks].filter(Boolean).join(' · '), failed:d.status==='failed'};
+}
+function paintDocBound(){
+  const box = document.getElementById('kb-bound');
+  if(!box) return;
+  const ids = S.editorDocIds||[];
+  box.innerHTML = ids.length ? ids.map(id=>{
+    const info = _docInfo(id);
+    const warn = info.failed ? '<div class="s" style="color:var(--err)">该文件解析失败，不会参与检索，建议移除后重建上传</div>' : '';
+    return `<div class="kb-row"><div class="kb-icon">📄</div>
+      <div><div class="t">${esc(info.name)}</div><div class="s">${esc(info.sub)}</div>${warn}</div>
+      <button class="kb-remove" onclick="removeDocBinding('${id}')">移除</button></div>`;
+  }).join('') : `<div class="kb-row"><div class="kb-icon">📄</div>
+      <div><div class="t muted">未绑定知识文件</div><div class="s">AI 将无法检索业务资料，点右上「＋ 选择文件」添加</div></div></div>`;
+}
+async function openDocModal(){
+  S.kbQuery = '';
+  const inp = document.getElementById('kb-search'); if(inp) inp.value = '';
+  await ensureDocs(true); /* 每次打开都拉最新清单，确保新上传的文件能被选中 */
+  document.getElementById('kb-modal').classList.remove('hidden');
+  paintDocModal();
+}
+function closeDocModal(){
+  document.getElementById('kb-modal').classList.add('hidden');
+  paintDocBound();
+  scheduleAutoSave();
+}
+function kbSearchInput(v){
+  S.kbQuery = (v||'').trim().toLowerCase();
+  paintDocModal();
+}
+function paintDocModal(){
+  const box = document.getElementById('kb-modal-list'); if(!box) return;
+  const ids = S.editorDocIds||[];
+  const q = S.kbQuery||'';
+  /* 解析失败的文件没有向量片段，选了也检索不到，不进可勾选列表 */
+  const failed = (S.docAll||[]).filter(d=>d.status==='failed');
+  const list = (S.docAll||[]).filter(d=>d.status!=='failed')
+    .filter(d=>!q || (d.filename||'').toLowerCase().includes(q) || (d.kb_name||'').toLowerCase().includes(q));
+  const foot = failed.length ? `<div class="muted small" style="padding:8px 14px 12px">${failed.length} 个文件解析失败（如不支持旧版 .xls），已隐藏；可到「知识库」页重建或删除</div>` : '';
+  box.innerHTML = (list.length ? list.map(d=>{
+    const bound = ids.includes(d.id);
+    const st = DOC_STATUS[d.status] || d.status || '';
+    const sub = [(d.kb_name||'默认知识库'), st, d.chunk_count>0?(d.chunk_count+' 段'):''].filter(Boolean).join(' · ');
+    return `<div class="kb-row"><div class="kb-icon">📄</div>
+      <div><div class="t">${esc(d.filename)}</div><div class="s">${esc(sub)}</div></div>
+      ${bound ? `<button class="kb-remove" onclick="docToggle('${d.id}')">移除</button>`
+              : `<button class="kb-add" onclick="docToggle('${d.id}')">添加</button>`}</div>`;
+  }).join('') : '<div class="muted small" style="padding:14px">没有匹配的文件，可到「知识库」页上传</div>') + foot;
+}
+function docToggle(id){
+  const d = (S.docAll||[]).find(x=>x.id===id);
+  if(d && d.status==='failed') return toast('该文件解析失败，不能参与检索','err');
+  if((S.editorDocIds||[]).includes(id)) S.editorDocIds = S.editorDocIds.filter(x=>x!==id);
+  else S.editorDocIds.push(id);
+  paintDocModal();
+}
+function removeDocBinding(id){
+  S.editorDocIds = (S.editorDocIds||[]).filter(x=>x!==id);
+  paintDocBound();
+  scheduleAutoSave();
+}
+function gotoKbPage(){
+  closeDocModal();
+  S.page = 'knowledge'; render();
+}
+
+/* ---- AI 回复设置弹窗（拟人 / 延迟区间 / 拆分 / 兜底） ---- */
+function _replyBackup(){ return JSON.stringify(S.replyState); }
+function paintReplySummary(){
+  const el = document.getElementById('reply-summary');
+  if(!el || !S.replyState) return;
+  const r = S.replyState; const parts = [];
+  parts.push(r.delayMax>0 ? `延迟 ${r.delayMin}~${r.delayMax} 秒` : '延迟关闭');
+  parts.push(r.split ? `拆分≤${r.splitMax} 条` : '拆分关闭');
+  parts.push('拟人'+(r.humanize?'开':'关'));
+  parts.push('兜底'+(r.fallback?'开':'关'));
+  el.textContent = parts.join(' · ');
+}
+function openReplyModal(){
+  // 以编辑器低置信度策略下拉的当前值为准，避免弹窗与主界面状态脱节
+  S.replyState.originPolicy = document.getElementById('f-policy').value;
+  S.replyState.fallback = S.replyState.originPolicy === 'fallback';
+  S.replyBackup = _replyBackup();
+  document.getElementById('rp-humanize').checked = S.replyState.humanize;
+  document.getElementById('rp-dmin').value = S.replyState.delayMin;
+  document.getElementById('rp-dmax').value = S.replyState.delayMax;
+  document.getElementById('rp-split').checked = S.replyState.split;
+  document.getElementById('rp-splitmax').value = S.replyState.splitMax;
+  document.getElementById('rp-smin').value = Math.round(S.replyState.splitMinMs)/1000;
+  document.getElementById('rp-smax').value = Math.round(S.replyState.splitMaxMs)/1000;
+  document.getElementById('rp-fallback').checked = S.replyState.fallback;
+  document.getElementById('reply-modal').classList.remove('hidden');
+  paintReplyModal();
+}
+function paintReplyModal(){
+  const on = document.getElementById('rp-split').checked;
+  document.getElementById('rp-split-card').classList.toggle('hidden', !on);
+}
+function _num(id, lo, hi, fb){
+  let v = +document.getElementById(id).value;
+  if(!isFinite(v)) v = fb;
+  return Math.min(hi, Math.max(lo, v));
+}
+function closeReplyModal(commit){
+  if(commit){
+    const r = S.replyState;
+    r.humanize = document.getElementById('rp-humanize').checked;
+    r.delayMin = _num('rp-dmin', 0, 60, 0);
+    r.delayMax = Math.max(r.delayMin, _num('rp-dmax', 0, 60, 0));
+    r.split = document.getElementById('rp-split').checked;
+    r.splitMax = Math.round(_num('rp-splitmax', 2, 5, 3));
+    r.splitMinMs = Math.round(_num('rp-smin', 0.1, 5, 0.8) * 1000);
+    r.splitMaxMs = Math.max(r.splitMinMs, Math.round(_num('rp-smax', 0.1, 5, 0.8) * 1000));
+    r.fallback = document.getElementById('rp-fallback').checked;
+    // 兜底开关落回编辑器「低置信度策略」下拉：开=兜底话术，关=追问澄清（原为转人工则保留转人工）
+    const policy = r.fallback ? 'fallback' : (r.originPolicy === 'fallback' ? 'clarify' : r.originPolicy);
+    const sel = document.getElementById('f-policy');
+    if(sel) sel.value = policy;
+    paintReplySummary();
+    scheduleAutoSave();
+  } else {
+    S.replyState = JSON.parse(S.replyBackup||'null') || S.replyState;
+  }
+  document.getElementById('reply-modal').classList.add('hidden');
+}
+
+/* ---- 自动停止回复弹窗（条件组 + 停止时间） ---- */
+const STOP_COND_LABELS = {ai_rounds:'AI回复轮次(单会话)', visitor_msgs:'访客消息条数(单会话)'};
+function _stopBackup(){ return JSON.stringify({enabled:S.stopState.enabled, message:S.stopState.message, groups:S.stopState.groups, timeEnabled:S.stopState.timeEnabled}); }
+function paintStopSummary(){
+  const el = document.getElementById('stop-summary');
+  if(!el || !S.stopState) return;
+  const parts = [];
+  const gcount = (S.stopState.groups||[]).filter(g=>g.length).length;
+  parts.push(S.stopState.enabled ? (gcount ? '已开启 · 停止条件 '+gcount+' 组' : '已开启 · 未配置条件组') : '未开启');
+  if((S.stopState.message||'').trim()) parts.push('结束语已设置');
+  parts.push('停止时段 '+(S.stopRules||[]).length+' 条');
+  el.textContent = parts.join(' · ');
+}
+function openStopModal(){
+  if(!(S.stopState.groups||[]).length) S.stopState.groups = [[{type:'ai_rounds', op:'gte', value:3}]];
+  S.stopBackup = _stopBackup();
+  document.getElementById('stop-enabled').checked = S.stopState.enabled;
+  document.getElementById('stop-time-enabled').checked = S.stopState.timeEnabled;
+  document.getElementById('stop-msg').value = S.stopState.message||'';
+  document.getElementById('stop-modal').classList.remove('hidden');
+  switchStopTab('cond');
+  paintStopGroups(); paintStopRules(); countStopMsg();
+}
+function closeStopModal(commit){
+  if(commit){
+    S.stopState.enabled = document.getElementById('stop-enabled').checked;
+    S.stopState.timeEnabled = document.getElementById('stop-time-enabled').checked;
+    S.stopState.message = (document.getElementById('stop-msg').value||'').slice(0,500);
+    S.stopState.groups = (S.stopState.groups||[]).filter(g=>g.length);
+    paintStopSummary();
+    scheduleAutoSave();
+  } else {
+    const bak = JSON.parse(S.stopBackup||'{}');
+    S.stopState.enabled = !!bak.enabled; S.stopState.message = bak.message||'';
+    S.stopState.groups = bak.groups||[]; S.stopState.timeEnabled = !!bak.timeEnabled;
+  }
+  document.getElementById('stop-modal').classList.add('hidden');
+}
+function switchStopTab(t){
+  const cond = t==='cond';
+  document.getElementById('stop-tab-cond').classList.toggle('active', cond);
+  document.getElementById('stop-tab-time').classList.toggle('active', !cond);
+  document.getElementById('stop-pane-cond').classList.toggle('hidden', !cond);
+  document.getElementById('stop-pane-time').classList.toggle('hidden', cond);
+}
+function countStopMsg(){
+  const el = document.getElementById('stop-msg'); const c = document.getElementById('stopmsg-counter');
+  if(el.value.length>500){ el.value = el.value.slice(0,500); }
+  c.textContent = el.value.length + ' / 500';
+}
+function paintStopGroups(){
+  const box = document.getElementById('stop-groups'); if(!box) return;
+  const groups = S.stopState.groups||[];
+  box.innerHTML = groups.length ? groups.map((g,gi)=>`
+    <div class="card" style="padding:10px 12px;margin:8px 0">
+      <div class="row" style="justify-content:space-between;margin:0 0 6px">
+        <b class="small">条件组 ${gi+1}</b>
+        <button class="ghost small" onclick="removeStopGroup(${gi})" title="删除该条件组">🗑</button>
+      </div>
+      ${g.map((c,ci)=>`
+        <div class="row" style="align-items:center;flex-wrap:wrap;gap:6px;margin:4px 0">
+          ${ci>0?'<span class="muted small">且</span>':''}
+          <select onchange="setStopCond(${gi},${ci},'type',this.value)">
+            ${Object.keys(STOP_COND_LABELS).map(k=>`<option value="${k}" ${c.type===k?'selected':''}>${STOP_COND_LABELS[k]}</option>`).join('')}
+          </select>
+          <span class="muted small">大于等于</span>
+          <input type="number" min="1" max="999" value="${c.value||1}" style="width:76px" onchange="setStopCond(${gi},${ci},'value',Math.min(999,Math.max(1,+this.value||1)))">
+          ${g.length>1?`<button class="ghost small" onclick="removeStopCond(${gi},${ci})" title="删除该条件">✕</button>`:''}
+        </div>`).join('')}
+      <button class="ghost small" onclick="addStopCond(${gi})">＋ 新建</button>
+    </div>`).join('')
+  : '<div class="muted small" style="padding:6px 0">暂无条件组，点下方「＋ 添加条件组」创建</div>';
+}
+function addStopGroup(){ (S.stopState.groups=S.stopState.groups||[]).push([{type:'ai_rounds',op:'gte',value:3}]); paintStopGroups(); }
+function removeStopGroup(gi){ S.stopState.groups.splice(gi,1); paintStopGroups(); }
+function addStopCond(gi){ S.stopState.groups[gi].push({type:'visitor_msgs',op:'gte',value:5}); paintStopGroups(); }
+function removeStopCond(gi,ci){ S.stopState.groups[gi].splice(ci,1); paintStopGroups(); }
+function setStopCond(gi,ci,key,v){ S.stopState.groups[gi][ci][key]=v; }
+
+/* ---- 停止时间规则 ---- */
+const DAY_LABELS = ['一','二','三','四','五','六','日'];
+function paintStopRules(){
+  const box = document.getElementById('stop-rules');
+  if(!box) return;
+  box.innerHTML = (S.stopRules||[]).length
+    ? S.stopRules.map((r,i)=>`
+      <div class="row" style="align-items:center;flex-wrap:wrap;gap:4px;margin:4px 0">
+        ${DAY_LABELS.map((d,di)=>`<label class="switch" style="margin:0" title="周${d}"><input type="checkbox" ${(r.days||[]).includes(di)?'checked':''} onchange="toggleStopDay(${i},${di},this.checked)">周${d}</label>`).join('')}
+        <input type="time" value="${r.start}" onchange="setStopTime(${i},'start',this.value)" style="width:104px">
+        <span class="muted small">至</span>
+        <input type="time" value="${r.end}" onchange="setStopTime(${i},'end',this.value)" style="width:104px">
+        <button class="ghost small" onclick="removeStopRule(${i})">删除</button>
+      </div>`).join('')
+    : '<div class="muted small">未设置停止时段（结束时间早于开始时间视为跨零点）</div>';
+}
+function addStopRule(){ (S.stopRules=S.stopRules||[]).push({days:[5,6], start:'22:00', end:'08:00'}); paintStopRules(); scheduleAutoSave(); }
+function removeStopRule(i){ S.stopRules.splice(i,1); paintStopRules(); scheduleAutoSave(); }
+function toggleStopDay(i,day,on){ const r=S.stopRules[i]; if(on){ if(!r.days.includes(day)) r.days.push(day); } else { r.days=r.days.filter(d=>d!==day); } scheduleAutoSave(); }
+function setStopTime(i,key,v){ S.stopRules[i][key]=v; scheduleAutoSave(); }
+/* ---- 自动保存：编辑器内改动防抖 900ms 后自动 PATCH 为草稿 ---- */
+let _saveTimer = null, _saving = false, _dirty = false;
+function setAutosaveStatus(t){
+  const el = document.getElementById('autosave-status');
+  if (el){ el.textContent = t || ''; el.style.display = t ? '' : 'none'; }
+}
+function scheduleAutoSave(){
+  if (!S.employeeId) return;
+  _dirty = true;
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(autoSaveEmployee, 900);
+}
+async function autoSaveEmployee(){
+  if (_saving){ scheduleAutoSave(); return; }   // 上一轮还没写完，再排一次
+  if (!S.employeeId || !document.getElementById('f-name')) return;
+  const nameEl = document.getElementById('f-name');
+  if (!nameEl.value.trim()){ setAutosaveStatus('名称为空，未保存'); return; }
+  _saving = true; _dirty = false;
+  setAutosaveStatus('保存中…');
+  try{
+    await api('/api/employees/'+S.employeeId,{method:'PATCH',body:JSON.stringify(collectEmployee())});
+    setAutosaveStatus('已自动保存 ' + new Date().toTimeString().slice(0,8));
+    if (_dirty){ _saving = false; return autoSaveEmployee(); }
+  }catch(e){
+    setAutosaveStatus('保存失败');
+    toast('自动保存失败：'+e.message,'err');
+  }finally{
+    _saving = false;
+  }
+}
+async function publishEmployee(btn){
+  await withBusy(btn, async()=>{
+    try{
+      await api('/api/employees/'+S.employeeId,{method:'PATCH',body:JSON.stringify(collectEmployee())});
+      let r = await api('/api/employees/'+S.employeeId+'/publish',{method:'POST',body:JSON.stringify({force:false})});
+      if (!r.ok && (r.blocked||[]).length){
+        document.getElementById('publish-result').innerHTML = '<div class="card" style="margin-top:10px;border-color:#5b2b2b"><b style="color:var(--err)">发布被阻断</b><ul class="small">'+r.blocked.map(b=>'<li>'+esc(b)+'</li>').join('')+'</ul></div>';
+        return;
+      }
+      if (!r.ok){
+        const ok = await askConfirm('确认发布', '存在需确认项：\n\n' + (r.warnings||[]).join('\n') + '\n\n确认继续发布？', {okText:'继续发布'});
+        if (!ok) return;
+        r = await api('/api/employees/'+S.employeeId+'/publish',{method:'POST',body:JSON.stringify({force:true})});
+      }
+      toast(r.message + ((r.warnings||[]).length? '\n提示：'+r.warnings.join('；') : ''),'ok');
+      render();
+    }catch(e){ toast(e.message,'err'); }
+  }, '发布中…');
+}
+async function createEmployee(){
+  const name = await askText('新建 AI 员工', {label:'名称', value:'客服二号', placeholder:'例如：售前小助手'});
+  if (!name || !name.trim()) return;
+  try{
+    const r = await api('/api/employees',{method:'POST',body:JSON.stringify({name, persona:'你是本店的在线客服，请依据知识库资料回答问题。'})});
+    S.employeeId = r.id; toast('已创建','ok'); render();
+  }catch(e){ toast(e.message,'err'); }
+}
+async function deleteEmployee(){
+  if (!await askConfirm('删除 AI 员工', '确认删除该 AI 员工？\n其配置与渠道凭证会一并删除，不可恢复。', {danger:true})) return;
+  try{ await api('/api/employees/'+S.employeeId,{method:'DELETE'}); S.employeeId=null; toast('已删除','ok'); render(); }
+  catch(e){ toast(e.message,'err'); }
+}
+async function loadVersions(){
+  try{
+    const r = await api('/api/employees/'+S.employeeId+'/versions');
+    document.getElementById('versions').innerHTML = '<h3>版本历史 <span class="muted small">最多保留 '+ (S.meta?.limits?.max_versions_kept||10) +' 个</span></h3>'+
+      '<table><tbody>'+(r.items.map(x=>`<tr><td>v${x.version_no}</td><td class="muted small">${esc(x.created_at.slice(0,19).replace('T',' '))}</td>
+      <td>${x.is_current?'<span class="tag ok">线上版本</span>':''}</td>
+      <td><button class="ghost" onclick="rollback(${x.version_no})">回滚到该版本</button></td></tr>`).join('')||'<tr><td class="muted">暂无版本</td></tr>')+'</tbody></table>'+
+      '<p class="hint">回滚只改草稿，仍需再次发布才对线上生效。</p>';
+  }catch(e){ toast(e.message,'err'); }
+}
+async function rollback(n){
+  if (!await askConfirm('回滚版本', '将草稿回滚为 v'+n+'？\n回滚后需再次发布才对线上生效。', {okText:'回滚'})) return;
+  try{ const r = await api('/api/employees/'+S.employeeId+'/versions/'+n+'/rollback',{method:'POST'}); toast(r.message.replace(/\*\*/g,''),'ok'); render(); }
+  catch(e){ toast(e.message,'err'); }
+}
+
+/* ---------------- 知识库 ---------------- */
+async function viewKnowledge(v){
+  await ensureEmployees();
+  const r = await api('/api/knowledge-bases'); S.kbs = r.items;
+  if (!S.kbId && r.items.length) S.kbId = r.items[0].id;
+  const docs = S.kbId ? await api('/api/knowledge-bases/'+S.kbId+'/documents') : {items:[],limits:{}};
+  const L = docs.limits || {};
+  const emp = S.employees.find(e=>e.id===S.employeeId);
+  const bound = new Set(emp ? (emp.kb_ids||[]) : []);
+  v.innerHTML = `<div class="split">
+    <div class="card">
+      <h3>知识库 <span class="muted small">${r.items.length}/${r.max}</span></h3>
+      ${r.items.map(k=>`<div class="list-item ${k.id===S.kbId?'active':''}" onclick="S.kbId='${k.id}';render()">
+        <div class="t">${esc(k.name)} ${bound.has(k.id)?'<span class="tag ok">AI 启用中</span>':''}</div><div class="s">${k.doc_count} 文档 · ${k.chunk_count} 片段 · ${bytes(k.total_bytes)}</div></div>`).join('') || '<p class="muted small">暂无知识库</p>'}
+      <div class="row" style="margin-top:10px">
+        <button onclick="createKb()">新建知识库</button>
+        <button class="danger" onclick="deleteKb()">删除</button>
+      </div>
+      <div class="card" style="margin-top:12px;background:var(--panel-2)">
+        <h3 style="font-size:13px">AI 客服启用 ${tip('勾选即参与 AI 回答检索，立即生效；未勾选的知识库不会被检索。勾选后该库内新上传的文件会自动纳入检索，不用再去逐个勾选文件')}</h3>
+        ${S.employees.length? `
+          ${S.employees.length>1? `<label>生效的 AI 客服</label>
+            <select onchange="S.employeeId=this.value;render()">${S.employees.map(e=>`<option value="${e.id}" ${e.id===S.employeeId?'selected':''}>${esc(e.name)}</option>`).join('')}</select>`:''}
+          <div>${r.items.map(k=>`<div class="switch"><input type="checkbox" onchange="toggleKbBinding('${k.id}',this.checked)" ${bound.has(k.id)?'checked':''}><label style="margin:0">${esc(k.name)}</label></div>`).join('') || '<span class="muted small">暂无知识库</span>'}</div>`
+        : '<p class="muted small">暂无可用的 AI 客服</p>'}
+      </div>
+      <div class="card" style="margin-top:12px;background:var(--panel-2)">
+        <h3 style="font-size:13px">边界值</h3>
+        <div class="small muted">
+          单文件 ${bytes(L.max_file_bytes)} · 单次 ${L.max_files_per_upload} 个 · 单库 ${L.max_docs_per_kb} 文档 / ${bytes(L.max_kb_bytes)}<br>
+          支持格式：${esc((L.allowed_ext||[]).join(' '))}
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <h3>上传文档 ${tip('解析失败的单个文件不会影响其他文件')}</h3>
+        <input type="file" id="files" multiple>
+        <div class="row" style="margin-top:10px"><button class="primary" onclick="uploadDocs(this)">上传并入库</button></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h3>检索测试</h3>
+        <div class="row"><input id="q" placeholder="输入一个问题，看看命中了哪些片段" style="flex:1" onkeydown="if(event.key==='Enter')searchTest(this.parentElement.querySelector('button'))">
+        <button onclick="searchTest(this)">检索</button></div>
+        <div id="search-result" style="margin-top:10px"></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h3>文档列表</h3>
+        <table><thead><tr><th>文件</th><th>状态</th><th>片段</th><th>大小</th><th></th></tr></thead><tbody>
+        ${docs.items.map(d=>`<tr>
+          <td>${esc(d.filename)}<div class="hint">${esc(d.error||'')}</div></td>
+          <td><span class="tag ${d.status==='success'?'ok':(d.status==='failed'?'err':'warn')}">${esc(d.status)}</span>
+            ${d.enabled?'':'<span class="tag">已停用</span>'}</td>
+          <td>${d.chunk_count}</td><td>${bytes(d.size_bytes)}</td>
+          <td class="row">
+            <button class="ghost small" onclick="toggleDoc('${d.id}',${!d.enabled})">${d.enabled?'停用':'启用'}</button>
+            <button class="ghost small" onclick="reindexDoc('${d.id}')">重建</button>
+            <button class="danger small" onclick="delDoc('${d.id}')">删除</button>
+          </td></tr>`).join('') || '<tr><td colspan="5" class="muted">暂无文档，先上传一份资料</td></tr>'}
+        </tbody></table>
+      </div>
+    </div>
+  </div>`;
+}
+/* 知识库 ↔ AI 客服的绑定开关。
+   AI 员工配置页移除后，这里是唯一能改「AI 用哪些知识库」的地方 ——
+   没有它，上传的资料就永远检索不到。 */
+async function toggleKbBinding(kbId, enabled){
+  const emp = S.employees.find(e=>e.id===S.employeeId);
+  if (!emp) return toast('没有可用的 AI 客服','err');
+  const ids = (emp.kb_ids||[]).slice();
+  const next = enabled ? (ids.includes(kbId)? ids : ids.concat(kbId)) : ids.filter(x=>x!==kbId);
+  try{
+    await api('/api/employees/'+emp.id,{method:'PATCH',body:JSON.stringify({kb_ids:next})});
+    // 绑定关系直接作用于检索，本不需要发布；但 PATCH 会把员工置为「草稿」，
+    // 留着这个状态容易让人误以为改动没生效，所以顺手发布一次保持一致。
+    await api('/api/employees/'+emp.id+'/publish',{method:'POST',body:JSON.stringify({force:true})}).catch(()=>{});
+    toast(enabled? '已启用，立即参与检索' : '已停用','ok');
+    await ensureEmployees(true);
+    render();
+  }catch(e){ toast(e.message,'err'); }
+}
+async function createKb(){
+  const name = await askText('新建知识库', {label:'名称', value:'产品资料库', placeholder:'例如：售后政策库'}); if(!name || !name.trim()) return;
+  try{ const r = await api('/api/knowledge-bases',{method:'POST',body:JSON.stringify({name,description:''})}); S.kbId=r.id; toast('已创建','ok'); render(); }
+  catch(e){ toast(e.message,'err'); }
+}
+async function deleteKb(){
+  if(!S.kbId) return; if(!await askConfirm('删除知识库', '确认删除该知识库及其全部文档与向量？此操作不可恢复。', {danger:true})) return;
+  try{ await api('/api/knowledge-bases/'+S.kbId,{method:'DELETE'}); S.kbId=null; toast('已删除','ok'); render(); }catch(e){ toast(e.message,'err'); }
+}
+async function uploadDocs(btn){
+  const input = document.getElementById('files');
+  if(!input.files.length) return toast('请先选择文件','err');
+  await withBusy(btn, async()=>{
+    const fd = new FormData();
+    for(const f of input.files) fd.append('files', f);
+    try{
+      const res = await fetch('/api/knowledge-bases/'+S.kbId+'/documents',{method:'POST',headers:{'Authorization':'Bearer '+S.token},body:fd});
+      const data = await res.json();
+      if(!res.ok) throw new Error(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail));
+      toast('入库完成：成功 '+data.accepted+' 个，拒绝 '+data.rejected+' 个','ok');
+      (data.items||[]).filter(i=>i.status==='failed').forEach(i=>toast(i.filename+'：'+i.error,'err'));
+      S.docAll = null; /* 失效缓存，AI 客服「选择文件」弹窗下次打开拉最新 */
+      render();
+    }catch(e){ toast(e.message,'err'); }
+  }, '入库中…');
+}
+async function toggleDoc(id, enabled){
+  try{ await api('/api/documents/'+id+'?enabled='+enabled,{method:'PATCH'}); render(); }catch(e){ toast(e.message,'err'); }
+}
+async function delDoc(id){
+  if(!await askConfirm('删除文档', '删除该文档及其全部向量数据？', {danger:true})) return;
+  try{ await api('/api/documents/'+id,{method:'DELETE'}); S.docAll=null; toast('已删除','ok'); render(); }catch(e){ toast(e.message,'err'); }
+}
+async function reindexDoc(id){
+  try{ const r=await api('/api/documents/'+id+'/reindex',{method:'POST'}); toast('重建完成，'+r.chunks+' 个片段','ok'); render(); }catch(e){ toast(e.message,'err'); }
+}
+async function searchTest(btn){
+  const q = document.getElementById('q').value.trim(); if(!q) return;
+  const _run = async()=>{
+    const box = document.getElementById('search-result'); box.innerHTML='<span class="muted small"><span class="loading-spin"></span>检索中…</span>';
+    try{
+      const r = await api('/api/knowledge/search-test',{method:'POST',body:JSON.stringify({query:q,kb_id:S.kbId,top_k:5})});
+      box.innerHTML = (r.items||[]).map(h=>`<div class="card" style="margin-top:8px;background:var(--panel-2)">
+        <div class="row" style="justify-content:space-between"><b class="small">${esc(h.filename||'知识库')}</b><span class="tag info">相关度 ${h.score}</span></div>
+        <div class="small muted" style="margin-top:6px;white-space:pre-wrap">${esc(h.text.slice(0,500))}</div></div>`).join('') || '<p class="muted small">没有命中任何片段</p>';
+    }catch(e){ box.innerHTML='<span style="color:var(--err)" class="small">'+esc(e.message)+'</span>'; }
+  };
+  if (btn) await withBusy(btn, _run, '检索中…'); else await _run();
+}
+
+/* ---------------- AI 员工测试（聊天式真实对话） ----------------
+   与「问答测试」的分工：问答测试是单轮批量回归（不落库、无上下文），
+   这里是真聊天 —— 消息落库、多轮上下文、与线上同一条 handle_turn 链路，
+   所以能测出「AI 记不记得上一句」「答不上来会不会乱编」这类只有多轮才暴露的问题。 */
+/* 聊天测试面板（组件）：员工配置页与独立的「AI 员工测试」页共用。
+   同一时刻只渲染一个页面，tc-* 的元素 id 不会冲突；对话状态存在 S 里，
+   两个入口进出时对话不丢。 */
+function tcPanelHtml(opts){
+  const o = opts || {};
+  return `<div class="card ${o.sticky?'tc-sticky':''}">
+    <div class="row" style="justify-content:space-between">
+      <div style="min-width:0"><b>${esc(o.title||'对话测试')}</b> ${tip('真实链路：消息落库、多轮上下文；测试会话不计入线上统计')}</div>
+      <div class="row">
+        <button class="ghost" onclick="newTestChat()">新对话</button>
+        <button class="danger" onclick="clearTestChat()">清空记录</button>
+      </div>
+    </div>
+    <div class="chat tc-chat" id="tc-chat"></div>
+    <div class="row" style="margin-top:10px">
+      <input id="tc-input" placeholder="输入消息，回车发送" style="flex:1" autocomplete="off"
+             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTestChat();}">
+      <button class="primary" id="tc-send" onclick="sendTestChat()">发送</button>
+    </div>
+  </div>`;
+}
+
+/* 复用最近一次测试对话，避免每次进来都是空白页 */
+async function tcEnsureSession(){
+  if (S.tcSession) return;
+  const list = await api('/api/testchat/'+S.employeeId+'/sessions').catch(()=>({items:[]}));
+  if (list.items && list.items.length) S.tcSession = list.items[0].id;
+}
+
+async function viewTestChat(v){
+  const items = await ensureEmployees();
+  if (!items.length){ v.innerHTML = '<div class="card muted">暂无可用的 AI 员工</div>'; return; }
+  await tcEnsureSession();
+  v.innerHTML = `<div style="max-width:860px;margin:0 auto;display:grid;gap:14px">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="row" style="flex:1">
+          ${items.length>1
+            ? `<div style="min-width:220px"><label style="margin-top:0">被测 AI 员工</label>
+                 <select onchange="switchTcEmployee(this.value)">${items.map(e=>`<option value="${e.id}" ${e.id===S.employeeId?'selected':''}>${esc(e.name)}</option>`).join('')}</select></div>`
+            : `<div><b>${esc(items[0].name)}</b><div class="hint" style="margin:0">被测 AI 员工</div></div>`}
+        </div>
+        <div class="hint" style="margin:0;max-width:420px;text-align:right">真实对话链路：多轮上下文、知识检索、兜底与转人工判定都与线上一致。</div>
+      </div>
+    </div>
+    ${tcPanelHtml({title:'对话测试'})}
+  </div>`;
+  await loadTestChat();
+  document.getElementById('tc-input').focus();
+}
+
+function tcBubble(role, content, meta){
+  if (role === 'system') return `<div class="msg system">${esc(content)}</div>`;
+  if (role === 'visitor') return `<div class="msg me">${esc(content)}</div>`;
+  const m = meta || {};
+  // 历史消息只存了命中来源与分数（不存片段正文，避免消息表膨胀），
+  // 这一轮刚返回的才有正文 —— 文案要如实说明，不能让人以为检索没命中。
+  if (m.pending) return '<div class="msg bot typing">AI 正在输入</div>';
+  const hits = m.hits || [];
+  const bits = [hits.length ? `命中 ${hits.length} 段` : '未命中片段'];
+  if (m.top_score) bits.push(`最高相关度 ${m.top_score}`);
+  if (m.confidence !== undefined && m.confidence !== null) bits.push(`置信 ${m.confidence}`);
+  if (m.latency_ms !== undefined) bits.push(`${m.latency_ms} ms`);
+  if (m.tokens) bits.push(`${m.tokens} tokens`);
+  const tags = (m.handoff? '<span class="tag warn">已转人工</span> ' : '')
+             + (m.degraded? '<span class="tag err">降级</span> ' : '');
+  const detail = hits.length
+    ? `<details style="margin-top:6px"><summary class="small muted">检索片段</summary>`
+      + hits.map(h=>`<div class="small muted" style="margin-top:6px;white-space:pre-wrap">〔${h.score}〕${esc(h.filename||'知识库')}<br>${esc((h.text||'').slice(0,400) || '（历史记录未保存片段正文，可在知识库「检索测试」复核）')}</div>`).join('')
+      + `</details>`
+    : '';
+  const note = (m.handoff_reason? `<div class="hint">转人工原因：${esc(m.handoff_reason)}</div>` : '')
+             + (m.degrade_reason? `<div class="hint">降级原因：${esc(m.degrade_reason)}</div>` : '');
+  return `<div class="msg bot">${esc(content) || '（空回复）'}
+    <div class="hint" style="margin-top:6px">${tags}${bits.join(' · ')}</div>${note}${detail}</div>`;
+}
+
+function paintTestChat(){
+  const box = document.getElementById('tc-chat');
+  if (!box) return;
+  box.innerHTML = S.tcMsgs.length
+    ? S.tcMsgs.map((m,i)=>tcBubble(m.role, m.content, m.meta||{})).join('')
+    : '<div class="muted small" style="padding:10px">还没有对话。发送一条消息开始测试。</div>';
+  const btn = document.getElementById('tc-send');
+  if (btn) btn.disabled = !!S.tcBusy;
+  box.scrollTop = box.scrollHeight;
+}
+
+async function loadTestChat(){
+  S.tcMsgs = [];
+  if (S.tcSession){
+    const d = await api('/api/testchat/'+S.employeeId+'/sessions/'+S.tcSession+'/messages').catch(()=>null);
+    if (d) S.tcMsgs = (d.items||[]).filter(m=>m.content);
+    else S.tcSession = null;   // 会话已被清掉，回到空态
+  }
+  paintTestChat();
+}
+
+async function sendTestChat(){
+  if (S.tcBusy) return;
+  const el = document.getElementById('tc-input');
+  const text = (el.value||'').trim();
+  if (!text) return;
+  S.tcBusy = true; el.value = '';
+  S.tcMsgs.push({role:'visitor', content:text, meta:{}});
+  S.tcMsgs.push({role:'ai', content:'', meta:{pending:true}});
+  paintTestChat();
+  try{
+    if (!S.tcSession){
+      const s = await api('/api/testchat/'+S.employeeId+'/sessions',{method:'POST'});
+      S.tcSession = s.id;
+    }
+    const r = await api('/api/testchat/'+S.employeeId+'/sessions/'+S.tcSession+'/messages',
+      {method:'POST', body:JSON.stringify({message:text})});
+    S.tcMsgs[S.tcMsgs.length-1] = {role:'ai', content:r.reply, meta:{
+      hits:r.hits, top_score:r.top_score, confidence:r.confidence,
+      latency_ms:r.latency_ms, tokens:r.tokens,
+      handoff:r.handoff, handoff_reason:r.handoff_reason,
+      degraded:r.degraded, degrade_reason:r.degrade_reason}};
+  }catch(e){
+    S.tcMsgs[S.tcMsgs.length-1] = {role:'system', content:'发送失败：'+e.message, meta:{}};
+  }finally{
+    S.tcBusy = false;
+    paintTestChat();
+    el.focus();
+  }
+}
+
+async function newTestChat(){
+  if (S.tcBusy) return;
+  try{
+    const s = await api('/api/testchat/'+S.employeeId+'/sessions',{method:'POST'});
+    S.tcSession = s.id; S.tcMsgs = []; paintTestChat();
+    document.getElementById('tc-input').focus();
+  }catch(e){ toast(e.message,'err'); }
+}
+
+async function clearTestChat(){
+  if (!await askConfirm('清空测试对话', '清空该 AI 客服下的全部测试对话记录？\n（只删测试数据，不影响线上会话）', {danger:true, okText:'确认清空'})) return;
+  try{
+    const r = await api('/api/testchat/'+S.employeeId+'/sessions',{method:'DELETE'});
+    S.tcSession = null; S.tcMsgs = []; paintTestChat();
+    toast('已清空 '+r.deleted+' 个测试对话','ok');
+  }catch(e){ toast(e.message,'err'); }
+}
+
+function switchTcEmployee(id){
+  S.employeeId = id; S.tcSession = null; S.tcMsgs = [];
+  render();
+}
+
+/* ---------------- 问答测试 ---------------- */
+async function viewPlayground(v){
+  const items = await ensureEmployees();
+  if (!items.length){ v.innerHTML = '<div class="card muted">暂无可用的 AI 员工</div>'; return; }
+  const runs = S.employeeId ? await api('/api/playground/'+S.employeeId+'/runs') : {items:[]};
+  v.innerHTML = `<div class="card">
+    <div class="row">
+      <div style="min-width:220px"><label>被测 AI 员工</label>
+        <select onchange="S.employeeId=this.value;render()">${items.map(x=>`<option value="${x.id}" ${x.id===S.employeeId?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+    </div>
+    <label>单条提问</label>
+    <div class="row"><input id="pq" placeholder="例如：户外电源保修多久？" style="flex:1" onkeydown="if(event.key==='Enter')askOne(this.parentElement.querySelector('button'))"><button class="primary" onclick="askOne(this)">测试</button></div>
+    <label>批量提问（每行一条，最多 ${S.meta?.limits?.batch_test_max||50} 条）</label>
+    <textarea id="pbatch" placeholder="每行一个问题"></textarea>
+    <div class="row" style="margin-top:10px"><button onclick="askBatch(this)">批量测试</button>
+      <button class="ghost" onclick="clearRuns()">清空历史</button></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>测试结果 ${tip('测试不影响线上会话，不产生工单；结果保留 '+(S.meta?.limits?.playground_keep_days||7)+' 天')}</h3><div id="pg-result">
+    ${runs.items.length? runs.items.map(x=>runHtml(x)).join('') : '<p class="muted small">还没有测试记录</p>'}
+  </div></div>`;
+}
+function runHtml(x, live){
+  const hits = (x.hits||[]);
+  return `<div class="card" style="background:var(--panel-2);margin-top:8px">
+    <div class="row" style="justify-content:space-between"><b class="small">Q：${esc(x.question)}</b>
+      <span class="row">${x.ok?'':'<span class="tag err">失败</span>'}
+      <span class="tag info">最高相关度 ${x.score}</span><span class="tag">${x.latency_ms} ms</span>${x.tokens?`<span class="tag">${x.tokens} tokens</span>`:''}</span></div>
+    <div class="small" style="margin-top:8px;white-space:pre-wrap">A：${esc(x.answer || x.error || '')}</div>
+    ${hits.length? '<details style="margin-top:6px"><summary class="small muted">命中 '+hits.length+' 个片段</summary>'+hits.map(h=>`<div class="small muted" style="margin-top:6px;white-space:pre-wrap">〔${h.score}〕${esc((h.text||'').slice(0,300))}</div>`).join('')+'</details>' : '<div class="hint">未命中任何知识片段（AI 应回答「没有相关资料」而不是编造）</div>'}
+  </div>`;
+}
+async function askOne(btn){
+  const q = document.getElementById('pq').value.trim(); if(!q) return;
+  const _run = async()=>{
+    const box = document.getElementById('pg-result'); box.innerHTML='<span class="muted small"><span class="loading-spin"></span>生成中…</span>';
+    try{ const r = await api('/api/playground/'+S.employeeId+'/ask',{method:'POST',body:JSON.stringify({question:q})});
+      box.innerHTML = runHtml(r); }
+    catch(e){ box.innerHTML='<span style="color:var(--err)" class="small">'+esc(e.message)+'</span>'; }
+  };
+  if (btn) await withBusy(btn, _run, '测试中…'); else await _run();
+}
+async function askBatch(btn){
+  const lines = document.getElementById('pbatch').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!lines.length) return toast('请先输入问题','err');
+  const _run = async()=>{
+    const box = document.getElementById('pg-result'); box.innerHTML='<span class="muted small"><span class="loading-spin"></span>批量执行中…</span>';
+    try{
+      const r = await api('/api/playground/'+S.employeeId+'/batch',{method:'POST',body:JSON.stringify({questions:lines})});
+      box.innerHTML = `<p class="hint">已执行 ${r.executed} 条${r.rejected_count?('，超出上限被丢弃 '+r.rejected_count+' 条'):''}${r.truncated?('，'+r.truncated+' 条被截断'):''}</p>` + r.items.map(x=>runHtml(x)).join('');
+    }catch(e){ box.innerHTML='<span style="color:var(--err)" class="small">'+esc(e.message)+'</span>'; }
+  };
+  if (btn) await withBusy(btn, _run, '执行中…'); else await _run();
+}
+async function clearRuns(){
+  if(!await askConfirm('清空测试记录', '清空该 AI 员工的全部测试记录？', {danger:true, okText:'确认清空'})) return;
+  try{ await api('/api/playground/'+S.employeeId+'/runs',{method:'DELETE'}); render(); }catch(e){ toast(e.message,'err'); }
+}
+
+/* ---------------- 用量 / 审计 ---------------- */
+/* 计量类型 → 中文标签。固定顺序展示，没数据的类型也显示 0 行（rerank 预留给二阶段召回）。 */
+const KIND_LABELS = {llm:'对话模型', embedding:'向量模型 Embedding', rerank:'重排 Rerank', asr:'语音识别'};
+const KIND_ORDER = ['llm','embedding','rerank','asr'];
+function kindRows(byKind, cols){
+  const extra = byKind.map(k=>k.kind).filter(k=>!KIND_ORDER.includes(k));
+  const all = [...KIND_ORDER, ...extra];
+  return all.map(k=>{
+    const d = byKind.find(x=>x.kind===k) || {calls:0,prompt_tokens:0,completion_tokens:0,total_tokens:0};
+    const tds = cols==='3'
+      ? `<td>${d.calls}</td><td>${d.total_tokens}</td>`
+      : `<td>${d.calls}</td><td>${d.prompt_tokens}</td><td>${d.completion_tokens}</td><td>${d.total_tokens}</td>`;
+    return `<tr><td>${KIND_LABELS[k]||k}</td>${tds}</tr>`;
+  }).join('');
+}
+async function viewUsage(v){
+  const u = await api('/api/insights/usage');
+  const q = u.daily_token_quota? Math.min(100,u.quota_used_percent):0;
+  v.innerHTML = `<div class="kpis">
+    <div class="kpi"><div class="k">今日 tokens</div><div class="v">${u.tokens_today}</div></div>
+    <div class="kpi"><div class="k">日配额</div><div class="v">${u.daily_token_quota}</div></div>
+    <div class="kpi"><div class="k">RPM 上限</div><div class="v">${u.rpm_limit}</div></div>
+    <div class="kpi"><div class="k">测试调用</div><div class="v">${u.playground_runs}</div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>配额使用 ${tip('超限时只降级本租户的 AI 接待并转人工，不影响其他租户')}</h3><div class="bar"><i style="width:${q}%"></i></div></div>
+  <div class="card" style="margin-top:14px"><h3>按类型</h3>
+    <table><thead><tr><th>类型</th><th>调用次数</th><th>输入 tokens</th><th>输出 tokens</th><th>合计</th></tr></thead><tbody>
+    ${kindRows(u.by_kind,'5')||'<tr><td colspan="5" class="muted">暂无</td></tr>'}
+    </tbody></table></div>
+  <div class="card" style="margin-top:14px"><h3>按 AI 员工</h3>
+    <table><thead><tr><th>员工</th><th>调用</th><th>tokens</th></tr></thead><tbody>
+    ${u.by_employee.map(k=>`<tr><td class="mono small">${esc(k.employee_id.slice(0,8))}</td><td>${k.calls}</td><td>${k.total_tokens}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">暂无</td></tr>'}
+    </tbody></table></div>`;
+}
+async function viewAudit(v){
+  const r = await api('/api/insights/audit');
+  v.innerHTML = `<div class="card"><h3>审计日志 <span class="muted small">保留 ${r.keep_days} 天</span></h3>
+  <table><thead><tr><th>时间</th><th>动作</th><th>结果</th><th>操作人</th><th>目标</th><th>详情</th></tr></thead><tbody>
+  ${r.items.map(x=>`<tr><td class="small mono">${esc(x.created_at.slice(0,19).replace('T',' '))}</td><td>${esc(x.action)}</td>
+    <td><span class="tag ${x.result==='allow'?'ok':'err'}">${esc(x.result)}</span></td><td class="small">${esc(x.actor_email||'-')}</td>
+    <td class="small mono">${esc((x.target||'').slice(0,12))}</td><td class="small muted">${esc((x.detail||'').slice(0,120))}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">暂无记录</td></tr>'}
+  </tbody></table></div>`;
+}
+
+/* ---------------- 平台运营 ---------------- */
+async function viewPlatform(v){
+  const o = await api('/api/platform/overview');
+  const r = await api('/api/platform/tenants');
+  v.innerHTML = `<div class="kpis">
+    <div class="kpi"><div class="k">租户</div><div class="v">${o.active_tenants}<span class="small muted">/${o.tenants}</span></div></div>
+    <div class="kpi"><div class="k">AI 员工</div><div class="v">${o.employees}</div></div>
+    <div class="kpi"><div class="k">会话</div><div class="v">${o.sessions}</div></div>
+    <div class="kpi"><div class="k">知识片段</div><div class="v">${o.chunks}</div></div>
+    <div class="kpi"><div class="k">今日 tokens（全部租户）</div><div class="v">${o.tokens_today}</div></div>
+    <div class="kpi"><div class="k">被拒绝的越权尝试</div><div class="v">${o.denied_audits}</div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>租户列表</h3>
+    <table><thead><tr><th>名称</th><th>状态</th><th>套餐</th><th>员工</th><th>会话</th><th>今日 tokens</th><th>配额</th><th></th></tr></thead><tbody>
+    ${r.items.map(t=>`<tr>
+      <td>${esc(t.name)}<div class="hint mono">${esc(t.slug)}</div></td>
+      <td><span class="tag ${t.status==='active'?'ok':'err'}">${esc(t.status)}</span></td>
+      <td>${esc(t.plan)}</td><td>${t.employees}</td><td>${t.sessions}</td><td>${t.tokens_today}</td><td>${t.daily_token_quota}</td>
+      <td class="row">
+        <button class="ghost small" onclick="toggleTenant('${t.id}','${t.status}')">${t.status==='active'?'停用':'启用'}</button>
+        <button class="ghost small" onclick="editQuota('${t.id}',${t.daily_token_quota},${t.rpm_limit})">配额</button>
+        <button class="ghost small" onclick="loginAs('${t.id}','${esc(t.name)}')">查看</button>
+        <button class="danger small" onclick="purgeTenant('${t.id}','${esc(t.slug)}')">注销删除</button>
+      </td></tr>`).join('')}
+    </tbody></table>
+    <div class="row" style="margin-top:12px"><button class="primary" onclick="createTenant()">新建租户</button>${tip('新建租户会自动获得一个默认 AI 员工、一个默认知识库和一个网页渠道凭证')}
+  </div>
+  <div id="tenant-detail"></div>`;
+}
+async function createTenant(){
+  const vals = await askForm('新建租户', [
+    {key:'name', label:'租户名称（客户公司名）', placeholder:'例如：星辰户外装备'},
+    {key:'email', label:'租户管理员邮箱', placeholder:'name@demo.local'},
+    {key:'password', label:'初始密码（至少 8 位）', value:'demo12345'},
+  ], '开通后自动获得一个默认 AI 员工、一个默认知识库和一个网页渠道凭证。');
+  if (!vals) return;
+  try{
+    const t = await api('/api/platform/tenants',{method:'POST',body:JSON.stringify({name:vals.name.trim(),admin_email:vals.email.trim(),admin_password:vals.password})});
+    toast('租户已开通：'+t.name,'ok'); render();
+  }catch(e){ toast(e.message,'err'); }
+}
+async function toggleTenant(id, status){
+  try{ await api('/api/platform/tenants/'+id,{method:'PATCH',body:JSON.stringify({status: status==='active'?'suspended':'active'})}); render(); }catch(e){ toast(e.message,'err'); }
+}
+async function editQuota(id, quota, rpm){
+  const vals = await askForm('调整配额', [
+    {key:'quota', label:'每日 token 配额', value:quota, type:'number'},
+    {key:'rpm', label:'每分钟请求上限 (RPM)', value:rpm, type:'number'},
+  ]);
+  if (!vals) return;
+  try{ await api('/api/platform/tenants/'+id,{method:'PATCH',body:JSON.stringify({daily_token_quota:+vals.quota, rpm_limit:+vals.rpm})}); toast('已更新','ok'); render(); }catch(e){ toast(e.message,'err'); }
+}
+async function loginAs(id, name){
+  try{
+    const u = await api('/api/platform/tenants/'+id+'/usage');
+    document.getElementById('tenant-detail').innerHTML = `<div class="card" style="margin-top:14px"><h3>${esc(name)} 用量</h3>
+      <p class="small muted">今日 ${u.tokens_today} / ${u.daily_token_quota}</p>
+      <table><thead><tr><th>类型</th><th>调用</th><th>tokens</th></tr></thead><tbody>
+      ${kindRows(u.by_kind,'3')}
+      </tbody></table>
+      <p class="hint">平台账号跨租户查看会写入审计日志。</p></div>`;
+  }catch(e){ toast(e.message,'err'); }
+}
+async function purgeTenant(id, slug){
+  const vals = await askForm('注销删除租户', [
+    {key:'value', label:'请输入租户标识「'+slug+'」以确认', placeholder:slug},
+  ], '这是不可逆操作：将彻底删除该租户的全部数据（员工、知识库、会话、用量记录）。');
+  if (!vals) return;
+  if (vals.value !== slug) return toast('输入不匹配，已取消','err');
+  try{ const r = await api('/api/platform/tenants/'+id+'/purge?confirm='+encodeURIComponent(slug),{method:'POST'}); toast(r.message,'ok'); render(); }catch(e){ toast(e.message,'err'); }
+}
+
+/* 启动 */
+/* 启动：全程先停在加载页；探测免登录模式 → 有令牌直接验 → 无令牌/令牌失效则自动签发 → 全失败才显示登录页 */
+(async function startup(){
+  const splash = document.getElementById('boot-splash');
+  const showLogin = ()=>{ splash.style.display='none'; document.getElementById('login').style.display='flex'; };
+  try{
+    const m = await fetch('/api/auth/mode').then(r=>r.json()).catch(()=>null);
+    window.AUTH_DISABLED = !!(m && m.auth_disabled);
+    if (!S.token){
+      if (window.AUTH_DISABLED && await autoLogin()){ boot(); return; }
+      showLogin(); return;
+    }
+    // 有存令牌：boot 失败（令牌过期等）会走 logout —— 免登录模式下自动重签
+    boot();
+  }catch(e){ showLogin(); }
+})(); 
+</script>
+</body>
+</html>
