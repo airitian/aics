@@ -27,6 +27,14 @@ footer input{flex:1}
 .chip{display:flex;gap:6px;flex-wrap:wrap;padding:4px 0}
 .chip img{height:44px;border-radius:6px;border:1px solid var(--line);object-fit:cover}
 .msg img.snap{max-width:180px;max-height:140px;border-radius:8px;display:block;margin:4px 0;cursor:zoom-in}
+/* 待发送图片缩略图：固定方格裁切 + 圆形移除按钮，宽图不再撑爆输入区 */
+.imgchips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:6px 16px 0}
+.imgchip{position:relative;width:56px;height:56px;flex:none}
+.imgchip img{width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid var(--line);display:block;background:#0b0f14;cursor:pointer}
+.imgchip img:hover{border-color:var(--accent)}
+.imgchip .rm{position:absolute;top:-7px;right:-7px;width:18px;height:18px;border-radius:50%;border:none;
+  background:#3a4757;color:#fff;font-size:12px;line-height:18px;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.imgchip .rm:hover{background:#c0392b}
 #root{height:100%;display:flex;flex-direction:column}
 #setup{padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)}
 </style>
@@ -46,7 +54,7 @@ footer input{flex:1}
     <span class="badge" id="sid">—</span>
   </header>
   <div id="chat"></div>
-  <div class="chip" id="chips" style="display:none;padding:0 16px"></div>
+  <div class="imgchips" id="chips" style="display:none"></div>
   <footer>
     <input type="file" id="imgfile" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" style="display:none" onchange="pickImages(this.files)">
     <button onclick="document.getElementById('imgfile').click()" title="发送图片">🖼</button>
@@ -77,8 +85,8 @@ let PENDING_IMGS = [];   // [{id,url}] 待随下一条消息发送
 function renderChips(){
   const box = document.getElementById('chips');
   box.innerHTML = PENDING_IMGS.map((im,i)=>
-    '<span style="position:relative"><img src="'+esc(im.url)+'" title="点击移除" onclick="PENDING_IMGS.splice('+i+',1);renderChips()">'
-    +'<button style="position:absolute;top:-6px;right:-6px;padding:0 5px;font-size:11px" onclick="event.stopPropagation();PENDING_IMGS.splice('+i+',1);renderChips()">×</button></span>'
+    '<span class="imgchip"><img src="'+esc(im.url)+'" title="点击移除" onclick="PENDING_IMGS.splice('+i+',1);renderChips()">'
+    +'<button class="rm" title="移除" onclick="event.stopPropagation();PENDING_IMGS.splice('+i+',1);renderChips()">×</button></span>'
   ).join('');
   box.style.display = PENDING_IMGS.length? 'flex':'none';
 }

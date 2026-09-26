@@ -94,6 +94,40 @@ details[open]>summary::before{content:"▾ "}
 .hint{font-size:11px;color:var(--txt-dim);margin-top:4px}
 .counter{font-size:11px;color:var(--txt-dim);text-align:right}
 .counter.over{color:var(--err)}
+
+/* ---- 图片缩略图（对话测试 / 待发送区）：独立类名，避免与筛选胶囊 .chip 冲突 ---- */
+.imgchips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}
+.imgchip{position:relative;width:56px;height:56px;border-radius:10px;overflow:visible;flex:none}
+.imgchip img{width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid var(--line);display:block;background:#0d1117}
+.imgchip img:hover{border-color:var(--accent)}
+.imgchip .rm{position:absolute;top:-7px;right:-7px;width:18px;height:18px;border-radius:50%;border:none;
+  background:#3a4757;color:#fff;font-size:12px;line-height:18px;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.imgchip .rm:hover{background:var(--err)}
+.msg .imgrow{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 6px}
+
+/* ---- AI 员工编辑器：分组卡片 + iOS 风格开关 ---- */
+.fgroup{background:rgba(255,255,255,.02);border:1px solid var(--line);border-radius:10px;padding:12px 14px 8px;margin:12px 0}
+.fgroup-title{font-size:12px;font-weight:600;letter-spacing:.05em;color:var(--accent-2);margin-bottom:2px;display:flex;align-items:center;gap:6px}
+.fgroup-title .sub{font-weight:400;color:var(--txt-dim);letter-spacing:0}
+.fgroup .switch{margin:10px 0;padding:6px 8px;border-radius:8px}
+.fgroup .switch:hover{background:rgba(255,255,255,.03)}
+.switch input{appearance:none;-webkit-appearance:none;width:34px;height:19px;border-radius:999px;background:#2a3442;
+  position:relative;cursor:pointer;transition:background .18s;flex:none;margin:0}
+.switch input::after{content:'';position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+  background:#aab6c5;transition:left .18s,background .18s}
+.switch input:checked{background:var(--accent)}
+.switch input:checked::after{left:17px;background:#fff}
+
+/* ---- 员工列表：头像色块 + 状态点 ---- */
+.emp-item{display:flex;align-items:center;gap:9px}
+.emp-avatar{width:32px;height:32px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:14px;font-weight:600;opacity:.92}
+.emp-main{display:flex;flex-direction:column;min-width:0}
+.emp-main .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.emp-main .s{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px}
+.dot.ok{background:#3fbf6f;box-shadow:0 0 4px rgba(63,191,111,.6)}
+.dot.warn{background:#e0a53a}
 pre{background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:12px;max-height:280px}
 .bar{height:6px;background:#0b0f14;border-radius:99px;overflow:hidden;border:1px solid var(--line)}
 .bar>i{display:block;height:100%;background:var(--accent)}
@@ -635,9 +669,12 @@ async function viewEmployees(v){
   v.innerHTML = `<div class="split3">
     <div class="card">
       <h3>AI 员工 <span class="muted small">${r.items.length}/${r.max}</span></h3>
-      ${r.items.map(x=>`<div class="list-item ${x.id===S.employeeId?'active':''}" onclick="S.employeeId='${x.id}';render()">
-        <div class="t">${esc(x.name)} ${x.is_default?'<span class="tag info">默认</span>':''}</div>
-        <div class="s">${x.status==='published'?('已发布 v'+x.published_version):'草稿'} ｜ ${x.kb_ids.length} 个知识库</div>
+      ${r.items.map(x=>`<div class="list-item emp-item ${x.id===S.employeeId?'active':''}" onclick="S.employeeId='${x.id}';render()">
+        <span class="emp-avatar" style="background:${empAvatarColor(x.name)}">${esc((x.name||'?').slice(0,1))}</span>
+        <span class="emp-main">
+          <span class="t">${esc(x.name)} ${x.is_default?'<span class="tag info">默认</span>':''}</span>
+          <span class="s"><i class="dot ${x.status==='published'?'ok':'warn'}"></i>${x.status==='published'?('已发布 v'+x.published_version):'草稿'} ｜ ${x.kb_ids.length} 个知识库</span>
+        </span>
       </div>`).join('')}
       <div class="row" style="margin-top:10px">
         <button onclick="createEmployee()">新建员工</button>
@@ -650,6 +687,11 @@ async function viewEmployees(v){
   await loadTestChat();
 }
 
+function empAvatarColor(name){
+  const palette = ['#7c5cff','#3d8bfd','#22b07d','#e0a53a','#e0637c','#9a6ae1','#2fb3c4'];
+  let h = 0; for (const ch of String(name||'')) h = (h*31 + ch.codePointAt(0)) % 997;
+  return palette[h % palette.length];
+}
 function sw(id,label,checked,tipText){
   return `<div class="switch"><input type="checkbox" id="${id}" ${checked?'checked':''}><label for="${id}" style="margin:0">${label}</label>${tipText?tip(tipText):''}</div>`;
 }
@@ -701,41 +743,53 @@ function editorHtml(e){
         <div class="counter" id="persona-counter"></div>
       </div>
       <div>
-        <label>输出语言</label>
-        <select id="f-lang">${['auto','zh-CN','zh-TW','en','ja','ko','ru','es','pt','fr','de','ar','th','vi','id']
-          .map(l=>`<option value="${l}" ${e.output_language===l?'selected':''}>${l}</option>`).join('')}</select>
-        <label>低置信度策略</label>
-        <select id="f-policy">
-          <option value="clarify" ${e.low_confidence_policy==='clarify'?'selected':''}>先追问澄清，超过轮次转人工</option>
-          <option value="handoff" ${e.low_confidence_policy==='handoff'?'selected':''}>直接转人工</option>
-          <option value="fallback" ${e.low_confidence_policy==='fallback'?'selected':''}>兜底话术回复</option>
-        </select>
-        <div class="row">
-          <div style="flex:1"><label>置信度阈值 (0-100)</label><input id="f-conf" type="number" min="0" max="100" value="${e.confidence_threshold}"></div>
-          <div style="flex:1"><label>澄清轮次 (0-3)</label><input id="f-clarify" type="number" min="0" max="3" value="${e.clarify_rounds}"></div>
-        </div>
-        <div class="row">
-          <div style="flex:1"><label>温度 (0-100)</label><input id="f-temp" type="number" min="0" max="100" value="${e.llm_temperature}"></div>
-          <div style="flex:1"><label>最大输出 tokens</label><input id="f-maxtok" type="number" min="1" max="4096" value="${e.llm_max_tokens}"></div>
-        </div>
-        <label>连续未有效回答阈值 (1-10)</label><input id="f-stop" type="number" min="1" max="10" value="${e.auto_stop_threshold}">
-        ${sw('f-fast','快速模式（速度优先）',e.fast_mode)}
-        ${sw('f-memory','记住客户历史（跨会话连贯服务）',e.memory_enabled,'开启=记住该客户跨会话的历史对话；关闭=仅记住当前会话最近 10 轮')}
-        ${sw('f-autostop','未有效回答自动转人工（连续 N 次未有效回答后转人工）',e.auto_stop_enabled)}
-        ${sw('f-group','群聊回复',e.group_reply_enabled,'依赖企微 / Telegram / WhatsApp 群聊渠道接入；本期为预留开关，渠道接入后生效')}
-        ${sw('f-asr','语音识别',e.asr_enabled)}
-        ${sw('f-time','获取当前时间',e.time_enabled)}
-
-        <label style="margin-top:10px"><b>AI 回复设置</b> <span class="muted small">拟人 / 延迟 / 拆分 / 兜底</span> ${tip('延迟回复：等待期内客户连发的消息会合并成一条统一回复。拆分只对较长回答生效；拆成多条仍按 1 次回复计费。')}</label>
-        <div class="row" style="align-items:center;margin-top:4px">
-          <div style="flex:1"><span class="muted small" id="reply-summary"></span></div>
-          <button class="ghost small" onclick="openReplyModal()">设置</button>
+        <div class="fgroup">
+          <div class="fgroup-title">🎛 基础参数 <span class="sub">模型行为的基本盘</span></div>
+          <div class="row">
+            <div style="flex:1"><label>输出语言</label>
+              <select id="f-lang">${['auto','zh-CN','zh-TW','en','ja','ko','ru','es','pt','fr','de','ar','th','vi','id']
+                .map(l=>`<option value="${l}" ${e.output_language===l?'selected':''}>${l}</option>`).join('')}</select></div>
+            <div style="flex:1"><label>温度 (0-100)</label><input id="f-temp" type="number" min="0" max="100" value="${e.llm_temperature}"></div>
+            <div style="flex:1"><label>最大输出 tokens</label><input id="f-maxtok" type="number" min="1" max="4096" value="${e.llm_max_tokens}"></div>
+          </div>
         </div>
 
-        <label style="margin-top:10px"><b>自动停止回复</b> ${tip('触发后本会话不再回复，新会话自动恢复；与「未有效回答转人工」互相独立')}</label>
-        <div class="row" style="align-items:center;margin-top:4px">
-          <div style="flex:1"><span class="muted small" id="stop-summary"></span></div>
-          <button class="ghost small" onclick="openStopModal()">设置</button>
+        <div class="fgroup">
+          <div class="fgroup-title">🎯 对话策略 <span class="sub">答不准时怎么兜</span></div>
+          <label>低置信度策略</label>
+          <select id="f-policy">
+            <option value="clarify" ${e.low_confidence_policy==='clarify'?'selected':''}>先追问澄清，超过轮次转人工</option>
+            <option value="handoff" ${e.low_confidence_policy==='handoff'?'selected':''}>直接转人工</option>
+            <option value="fallback" ${e.low_confidence_policy==='fallback'?'selected':''}>兜底话术回复</option>
+          </select>
+          <div class="row">
+            <div style="flex:1"><label>置信度阈值 (0-100)</label><input id="f-conf" type="number" min="0" max="100" value="${e.confidence_threshold}"></div>
+            <div style="flex:1"><label>澄清轮次 (0-3)</label><input id="f-clarify" type="number" min="0" max="3" value="${e.clarify_rounds}"></div>
+            <div style="flex:1"><label>连续未有效回答阈值 (1-10)</label><input id="f-stop" type="number" min="1" max="10" value="${e.auto_stop_threshold}"></div>
+          </div>
+          ${sw('f-autostop','未有效回答自动转人工（连续 N 次未有效回答后转人工）',e.auto_stop_enabled)}
+          <label style="margin-top:10px"><b>自动停止回复</b> ${tip('触发后本会话不再回复，新会话自动恢复；与「未有效回答转人工」互相独立')}</label>
+          <div class="row" style="align-items:center;margin-top:4px">
+            <div style="flex:1"><span class="muted small" id="stop-summary"></span></div>
+            <button class="ghost small" onclick="openStopModal()">设置</button>
+          </div>
+        </div>
+
+        <div class="fgroup">
+          <div class="fgroup-title">⚡ 能力开关</div>
+          ${sw('f-fast','快速模式（速度优先）',e.fast_mode)}
+          ${sw('f-memory','记住客户历史（跨会话连贯服务）',e.memory_enabled,'开启=记住该客户跨会话的历史对话；关闭=仅记住当前会话最近 10 轮')}
+          ${sw('f-group','群聊回复',e.group_reply_enabled,'依赖企微 / Telegram / WhatsApp 群聊渠道接入；本期为预留开关，渠道接入后生效')}
+          ${sw('f-asr','语音识别',e.asr_enabled)}
+          ${sw('f-time','获取当前时间',e.time_enabled)}
+        </div>
+
+        <div class="fgroup">
+          <div class="fgroup-title">💬 AI 回复设置 <span class="sub">拟人 / 延迟 / 拆分 / 兜底</span> ${tip('延迟回复：等待期内客户连发的消息会合并成一条统一回复。拆分只对较长回答生效；拆成多条仍按 1 次回复计费。')}</div>
+          <div class="row" style="align-items:center;margin-top:4px">
+            <div style="flex:1"><span class="muted small" id="reply-summary"></span></div>
+            <button class="ghost small" onclick="openReplyModal()">设置</button>
+          </div>
         </div>
 
         <label style="display:flex;justify-content:space-between;align-items:center"><span>知识（AI 的检索范围）${tip('两种用法二选一：① 推荐——到「知识库」页勾选整库，之后新上传的文件自动参与检索；② 这里逐个勾选文件（静态清单，新上传的文件不会自动加入，需要手动勾选）。若两边都勾了，以知识库为准。改动自动保存，「发布」后生效。')}</span>
@@ -1530,7 +1584,7 @@ function tcPanelHtml(opts){
       </div>
     </div>
     <div class="chat tc-chat" id="tc-chat"></div>
-    <div id="tc-chips" class="chip" style="display:none"></div>
+    <div id="tc-chips" class="imgchips" style="display:none"></div>
     <div class="row" style="margin-top:10px">
       <input type="file" id="tc-imgfile" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" style="display:none" onchange="tcPickImages(this.files)">
       <button onclick="document.getElementById('tc-imgfile').click()" title="发送图片">🖼</button>
@@ -1626,8 +1680,8 @@ function tcRenderChips(){
   const box = document.getElementById('tc-chips');
   if (!box) return;
   box.innerHTML = TC_IMGS.map((im,i)=>
-    '<span style="position:relative"><img class="snap" style="max-height:52px" src="'+esc(im.url)+'">'
-    +'<button style="position:absolute;top:-8px;right:-8px;padding:0 5px;font-size:11px" onclick="TC_IMGS.splice('+i+',1);tcRenderChips()">×</button></span>'
+    '<span class="imgchip"><img src="'+esc(im.url)+'" title="点击移除" onclick="TC_IMGS.splice('+i+',1);tcRenderChips()">'
+    +'<button class="rm" title="移除" onclick="event.stopPropagation();TC_IMGS.splice('+i+',1);tcRenderChips()">×</button></span>'
   ).join('');
   box.style.display = TC_IMGS.length? 'flex':'none';
 }
