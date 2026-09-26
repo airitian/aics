@@ -18,18 +18,22 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy import delete, func, select
 
 from app import agent as agent_mod
-from app import prompting
+from app import chatimages, prompting
 from app.config import TEST_CHANNEL
+from app.database import get_db
 from app.deps import get_scope, get_tenant, require_roles
+from app.docstore import read_chat_image, save_chat_image
 from app.models import (
     AiEmployee,
+    ChatImage,
     Message,
     MessageRole,
     Session as ChatSession,
@@ -41,6 +45,7 @@ from app.models import (
 from app.schemas import HitOut, TestChatIn, TestChatOut
 from app.scoping import TenantScope
 from app.utils import new_id, utcnow
+from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger("aics.testchat")
 
@@ -194,6 +199,67 @@ def messages(
     return {"session": _session_out(row, len(rows)), "items": [_message_out(m) for m in rows]}
 
 
+@router.post("/{employee_id}/images")
+async def upload_image(
+    employee_id: str,
+    file: UploadFile = File(...),
+    tenant: Tenant = Depends(get_tenant),
+    scope: TenantScope = Depends(get_scope),
+    user: User = Depends(tester),
+) -> dict:
+    """对话测试上传图片（与线上 /api/chat/images 走同一套校验与落盘规则）。
+
+    测试者必须能传图：图片链路是「测试页测出来的行为 = 线上行为」承诺的一部分，
+    只有线上能发图、测试页不能，图片相关的回归就全靠盲测了。
+    """
+    _employee(scope, employee_id)
+    data = await file.read()
+    ext = chatimages.validate_upload(file, data)
+
+    img = ChatImage(
+        id=new_id(),
+        tenant_id=tenant.id,
+        visitor_id=_visitor_id(user),
+        filename=(file.filename or "")[:255],
+        mime=(file.content_type or "").split(";")[0].strip().lower(),
+        ext=ext,
+        size_bytes=len(data),
+    )
+    scope.db.add(img)
+    scope.db.flush()
+    img.rel_path = await run_in_threadpool(save_chat_image, tenant.id, img.id, ext, data)
+    scope.db.commit()
+    return {
+        "image_id": img.id,
+        "url": f"/api/testchat/{employee_id}/images/{img.id}",
+    }
+
+
+@router.get("/{employee_id}/images/{image_id}")
+def get_image(
+    employee_id: str,
+    image_id: str,
+    tenant: Tenant = Depends(get_tenant),
+    scope: TenantScope = Depends(get_scope),
+    user: User = Depends(tester),
+) -> Response:
+    """取回测试上传的图片原图（仅限本租户 + 本人上传的）。"""
+    _employee(scope, employee_id)
+    row = scope.db.execute(
+        select(ChatImage).where(
+            ChatImage.id == image_id,
+            ChatImage.tenant_id == tenant.id,
+            ChatImage.visitor_id == _visitor_id(user),
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图片不存在")
+    data = read_chat_image(row.rel_path)
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图片文件已丢失")
+    return Response(content=data, media_type=row.mime or "image/png")
+
+
 @router.post("/{employee_id}/sessions/{session_id}/messages", response_model=TestChatOut)
 async def send_message(
     employee_id: str,
@@ -208,6 +274,15 @@ async def send_message(
     row = _owned_session(scope, employee, session_id, user)
     db = scope.db
 
+    # 图片：与线上 chat 同一套校验/转写（visitor_id 是测试者自己的标识）
+    image_payloads = await chatimages.resolve_and_transcribe(
+        db,
+        tenant_id=tenant.id,
+        visitor_id=_visitor_id(user),
+        session_id=row.id,
+        image_ids=payload.image_ids,
+    )
+
     # 访客消息先落库（与线上 chat 一致：消息不能丢）。
     # autoflush=False，故此处不 flush —— 详见模块文档字符串里的说明。
     db.add(
@@ -216,7 +291,13 @@ async def send_message(
             session_id=row.id,
             role=MessageRole.VISITOR,
             content=payload.message,
-            meta="{}",
+            meta=(
+                json.dumps(
+                    {"images": chatimages.meta_images(image_payloads)}, ensure_ascii=False
+                )
+                if image_payloads
+                else "{}"
+            ),
         )
     )
     row.last_active_at = utcnow()
@@ -231,6 +312,7 @@ async def send_message(
         persist=True,
         origin="playground",
         llm_profile=_llm_profile(request),
+        images=image_payloads or None,
     )
 
     # 与线上链路保持同一套「连续未有效回答 → 停止 AI 回复」逻辑。

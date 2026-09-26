@@ -24,6 +24,9 @@ footer{border-top:1px solid var(--line);padding:12px 16px;display:flex;gap:10px}
 footer input{flex:1}
 .badge{font-size:11px;padding:2px 8px;border:1px solid var(--line);border-radius:99px;color:var(--dim)}
 .hits{font-size:11px;color:var(--dim);margin-top:4px}
+.chip{display:flex;gap:6px;flex-wrap:wrap;padding:4px 0}
+.chip img{height:44px;border-radius:6px;border:1px solid var(--line);object-fit:cover}
+.msg img.snap{max-width:180px;max-height:140px;border-radius:8px;display:block;margin:4px 0;cursor:zoom-in}
 #root{height:100%;display:flex;flex-direction:column}
 #setup{padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)}
 </style>
@@ -43,8 +46,11 @@ footer input{flex:1}
     <span class="badge" id="sid">—</span>
   </header>
   <div id="chat"></div>
+  <div class="chip" id="chips" style="display:none;padding:0 16px"></div>
   <footer>
-    <input id="msg" placeholder="输入消息后回车发送" onkeydown="if(event.key==='Enter')send()">
+    <input type="file" id="imgfile" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" style="display:none" onchange="pickImages(this.files)">
+    <button onclick="document.getElementById('imgfile').click()" title="发送图片">🖼</button>
+    <input id="msg" placeholder="输入消息后回车发送（可粘贴图片）" onkeydown="if(event.key==='Enter')send()" onpaste="pasteImage(event)">
     <button class="primary" onclick="send()">发送</button>
   </footer>
 </div>
@@ -57,12 +63,45 @@ if (params.get('key')) document.getElementById('key').value = params.get('key');
 if (params.get('visitor')) document.getElementById('visitor').value = params.get('visitor');
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function bubble(role, text, extra){
+function bubble(role, text, extra, images){
   const d = document.createElement('div');
   d.className = 'msg ' + role;
-  d.innerHTML = esc(text) + (extra? '<div class="hits">'+esc(extra)+'</div>' : '');
+  let imgs = '';
+  for (const im of (images||[])) imgs += '<img class="snap" src="'+esc(im.url)+'" onclick="window.open(this.src)" alt="图片">';
+  d.innerHTML = imgs + esc(text) + (extra? '<div class="hits">'+esc(extra)+'</div>' : '');
   document.getElementById('chat').appendChild(d);
   document.getElementById('chat').scrollTop = 1e9;
+}
+/* ---- 图片上传 ---- */
+let PENDING_IMGS = [];   // [{id,url}] 待随下一条消息发送
+function renderChips(){
+  const box = document.getElementById('chips');
+  box.innerHTML = PENDING_IMGS.map((im,i)=>
+    '<span style="position:relative"><img src="'+esc(im.url)+'" title="点击移除" onclick="PENDING_IMGS.splice('+i+',1);renderChips()">'
+    +'<button style="position:absolute;top:-6px;right:-6px;padding:0 5px;font-size:11px" onclick="event.stopPropagation();PENDING_IMGS.splice('+i+',1);renderChips()">×</button></span>'
+  ).join('');
+  box.style.display = PENDING_IMGS.length? 'flex':'none';
+}
+async function uploadOne(file){
+  const fd = new FormData();
+  fd.append('file', file); fd.append('visitor_id', VISITOR);
+  const res = await fetch('/api/chat/images',{method:'POST',headers:{'X-Widget-Key':KEY},body:fd});
+  const data = await res.json();
+  if(!res.ok) throw new Error(data.detail||('HTTP '+res.status));
+  return data;
+}
+async function pickImages(files){
+  if(!KEY) return alert('请先连接');
+  for (const f of files){
+    if(PENDING_IMGS.length >= 3){ alert('一条消息最多 3 张图片'); break; }
+    try{ PENDING_IMGS.push(await uploadOne(f)); }
+    catch(e){ alert('图片上传失败：'+e.message); }
+  }
+  renderChips();
+}
+function pasteImage(ev){
+  const files = [...(ev.clipboardData?.files||[])].filter(f=>f.type.startsWith('image/'));
+  if(files.length){ ev.preventDefault(); pickImages(files); }
 }
 function setStatus(t, cls){ const e=document.getElementById('status'); e.textContent=t; }
 function showTyping(){
@@ -109,14 +148,16 @@ async function loadHistory(){
 async function send(){
   const input = document.getElementById('msg');
   const text = input.value.trim();
-  if(!text || !KEY) return;
+  if((!text && !PENDING_IMGS.length) || !KEY) return;
   input.value='';
-  bubble('visitor', text);
+  const sentImgs = PENDING_IMGS.slice();
+  bubble('visitor', text, '', sentImgs);
+  PENDING_IMGS = []; renderChips();
   showTyping();
   try{
     const res = await fetch('/api/chat/message',{method:'POST',
       headers:{'Content-Type':'application/json','X-Widget-Key':KEY},
-      body:JSON.stringify({message:text, visitor_id:VISITOR, session_id:SID})});
+      body:JSON.stringify({message:text||'（发送了图片）', visitor_id:VISITOR, session_id:SID, image_ids:sentImgs.map(i=>i.id)})});
     const data = await res.json();
     if(!res.ok) throw new Error(data.detail||('HTTP '+res.status));
     SID = data.session_id;

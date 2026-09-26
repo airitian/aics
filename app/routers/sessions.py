@@ -1,7 +1,7 @@
 """人工兜底与协作：坐席侧会话接口。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,7 +9,17 @@ from app import audit
 from app.config import TEST_CHANNEL
 from app.database import get_db
 from app.deps import get_scope, get_tenant, require_roles
-from app.models import Message, MessageRole, Session as ChatSession, SessionStatus, Tenant, User, UserRole
+from app.docstore import read_chat_image
+from app.models import (
+    ChatImage,
+    Message,
+    MessageRole,
+    Session as ChatSession,
+    SessionStatus,
+    Tenant,
+    User,
+    UserRole,
+)
 from app.ratelimit import record_usage  # noqa: F401  (保持导入一致，便于后续扩展)
 from app.schemas import AgentReplyIn
 from app.scoping import TenantScope
@@ -87,10 +97,49 @@ def messages(
                 "content": m.content,
                 "created_at": m.created_at.isoformat(),
                 "meta": m.meta_data,
+                "images": [
+                    {
+                        "id": i["id"],
+                        "url": f"/api/sessions/{session_id}/images/{i['id']}",
+                        "ocr_status": i.get("ocr_status", ""),
+                    }
+                    for i in (m.meta_data.get("images") or [])
+                    if i.get("id")
+                ],
             }
             for m in rows
         ],
     }
+
+
+@router.get("/sessions/{session_id}/images/{image_id}")
+def session_image(
+    session_id: str,
+    image_id: str,
+    scope: TenantScope = Depends(get_scope),
+    user: User = Depends(agent_role),
+) -> Response:
+    """坐席取看会话里客户发的原图。
+
+    人工接管时坐席必须能看到客户拍的是什么 —— 转写文本会丢掉视觉细节
+    （划痕位置、装配方向），这些恰恰是售后沟通里最要紧的信息。
+    """
+    session = scope.get(ChatSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+    row = scope.db.execute(
+        select(ChatImage).where(
+            ChatImage.id == image_id,
+            ChatImage.tenant_id == session.tenant_id,
+            ChatImage.session_id == session_id,
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图片不存在")
+    data = read_chat_image(row.rel_path)
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图片文件已丢失")
+    return Response(content=data, media_type=row.mime or "image/png")
 
 
 @router.post("/sessions/{session_id}/takeover")

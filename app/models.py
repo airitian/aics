@@ -418,6 +418,40 @@ class VisitorMemory(Base, TimestampMixin):
     kind: Mapped[str] = mapped_column(String(24), default="fact", nullable=False)
 
 
+class ChatImageStatus:
+    PENDING = "pending"   # 还没送视觉模型（上传早于发送）
+    OK = "ok"
+    FAILED = "failed"
+
+
+class ChatImage(Base, TimestampMixin):
+    """客户在聊天中发来的一张图。
+
+    为什么独立成表而不是只塞进 Message.meta：转写文本要**跨轮复用**（多轮
+    上下文里反复出现）、原图要可回看（坐席核实「客户拍的是什么」）、上传
+    时刻可能还没有会话（先传图再发文字），这三件事都需要图有自己的行。
+
+    session_id 可空：图片先于首条消息上传时还不知道会话，发送时再绑定。
+    """
+
+    __tablename__ = "chat_images"
+    __table_args__ = (Index("ix_chatimg_tenant_visitor", "tenant_id", "visitor_id"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(32), ForeignKey("tenants.id"), nullable=False, index=True)
+    session_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    visitor_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    mime: Mapped[str] = mapped_column(String(64), default="image/png", nullable=False)
+    ext: Mapped[str] = mapped_column(String(8), default="png", nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 相对 assets_dir 的路径（与文档资产同一套规则：迁移机器不至于全盘失效）
+    rel_path: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    # 视觉模型转写的图中内容；空 = 没读出来（ocr_status 说明原因）
+    ocr_text: Mapped[str] = mapped_column(Text, default="")
+    ocr_status: Mapped[str] = mapped_column(String(16), default=ChatImageStatus.PENDING, nullable=False)
+
+
 # --------------------------------------------------------------------------- #
 # 计量 / 审计 / 测试
 # --------------------------------------------------------------------------- #

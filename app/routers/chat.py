@@ -12,22 +12,25 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app import agent as agent_mod
-from app import prompting, ratelimit
+from app import chatimages, prompting, ratelimit
 from app.config import settings
 from app.database import get_db
 from app.deps import WidgetContext, get_widget_context
-from app.models import AiEmployee, Message, MessageRole, Session as ChatSession, SessionStatus
+from app.docstore import read_chat_image, save_chat_image
+from app.models import AiEmployee, ChatImage, Message, MessageRole, Session as ChatSession, SessionStatus
 from app.schemas import ChatIn, ChatOut, HitOut
-from app.utils import utcnow
+from app.utils import new_id, utcnow
 
 logger = logging.getLogger("aics.chat")
 
@@ -35,8 +38,8 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 OPEN_STATUSES = (SessionStatus.AI, SessionStatus.QUEUED, SessionStatus.HUMAN)
 
-# 延迟回复的聚合窗口：session_id -> [(到达时刻, 消息文本)]，按到达顺序
-_PENDING: dict[str, list[tuple[float, str]]] = {}
+# 延迟回复的聚合窗口：session_id -> [(到达时刻, 消息文本, 图片载荷)]，按到达顺序
+_PENDING: dict[str, list[tuple[float, str, list[dict]]]] = {}
 
 
 def _reply_delay_seconds(employee: AiEmployee) -> int:
@@ -87,6 +90,61 @@ def widget_config(
         "split_interval_ms": _split_interval_ms(employee) if employee.split_reply_enabled else 800,
         "published": employee.published_version > 0,
     }
+
+
+@router.post("/images")
+async def upload_image(
+    visitor_id: str = Form(...),
+    file: UploadFile = File(...),
+    ctx: WidgetContext = Depends(get_widget_context),
+    db: Session = Depends(get_db),
+) -> dict:
+    """上传一张聊天图片，返回 image_id；发送消息时放进 image_ids。
+
+    上传与发送分离：图片要先有 id，消息体（JSON）才能引用它。
+    此刻只做落盘，转写推迟到发送时 —— 大多数人传了图还会打字，
+    在上传时转写会白白多等一次视觉模型（4s 级）。
+    """
+    data = await file.read()
+    ext = chatimages.validate_upload(file, data)
+
+    img = ChatImage(
+        id=new_id(),
+        tenant_id=ctx.tenant.id,
+        visitor_id=visitor_id[:64],
+        filename=(file.filename or "")[:255],
+        mime=(file.content_type or "").split(";")[0].strip().lower(),
+        ext=ext,
+        size_bytes=len(data),
+    )
+    db.add(img)
+    db.flush()
+    img.rel_path = await run_in_threadpool(save_chat_image, ctx.tenant.id, img.id, ext, data)
+    db.commit()
+    return {"image_id": img.id, "url": chatimages.url_of(img.id, visitor_id=visitor_id)}
+
+
+@router.get("/images/{image_id}")
+def get_image(
+    image_id: str,
+    visitor_id: str,
+    ctx: WidgetContext = Depends(get_widget_context),
+    db: Session = Depends(get_db),
+) -> Response:
+    """取回聊天图片原图。访客只能取自己的图（同会话回放需要）。"""
+    row = db.execute(
+        select(ChatImage).where(
+            ChatImage.id == image_id,
+            ChatImage.tenant_id == ctx.tenant.id,
+            ChatImage.visitor_id == visitor_id,
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图片不存在")
+    data = read_chat_image(row.rel_path)
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图片文件已丢失")
+    return Response(content=data, media_type=row.mime or "image/png")
 
 
 def _get_or_create_session(
@@ -152,6 +210,16 @@ async def send_message(
     try:
         session = _get_or_create_session(db, ctx=ctx, payload=payload)
 
+        # 图片：归属校验 + 首次绑定会话 + 转写（失败降级为「读不到图」，不拦消息）
+        image_payloads = await chatimages.resolve_and_transcribe(
+            db,
+            tenant_id=tenant.id,
+            visitor_id=payload.visitor_id,
+            session_id=session.id,
+            image_ids=payload.image_ids,
+        )
+        image_meta = chatimages.meta_images(image_payloads)
+
         # 人工接管中：AI 静默，访客消息照常落库（不丢消息），不给 AI 回复（PRD 6.1）
         if session.status == SessionStatus.HUMAN:
             db.add(
@@ -160,7 +228,7 @@ async def send_message(
                     session_id=session.id,
                     role=MessageRole.VISITOR,
                     content=payload.message,
-                    meta="{}",
+                    meta=f'{{"images": {json.dumps(image_meta, ensure_ascii=False)}}}',
                 )
             )
             session.last_active_at = utcnow()
@@ -180,7 +248,7 @@ async def send_message(
         delay = _reply_delay_seconds(employee)
         if delay > 0 and session.status == SessionStatus.AI:
             arrival = time.monotonic()
-            _PENDING.setdefault(session.id, []).append((arrival, payload.message))
+            _PENDING.setdefault(session.id, []).append((arrival, payload.message, image_meta))
             await asyncio.sleep(delay)
             buf = _PENDING.get(session.id) or []
             if not buf or buf[-1][0] != arrival:
@@ -188,14 +256,26 @@ async def send_message(
                 return ChatOut(session_id=session.id, reply="", status=session.status)
             # 我是窗口内最后一条：取走全部缓冲消息，合并为一条访客消息
             _PENDING[session.id] = []
-            message_text = "\n".join(t for _, t in buf) or payload.message
+            message_text = "\n".join(t for _, t, _ in buf) or payload.message
+            # 窗口内可能多条都带了图：合并引用（转写文本仍在 ChatImage，不重复存储）
+            merged_images = [im for _, _, ims in buf for im in ims][: settings.chat_image_max_per_message]
+            image_meta = merged_images
+            image_payloads = await chatimages.resolve_and_transcribe(
+                db,
+                tenant_id=tenant.id,
+                visitor_id=payload.visitor_id,
+                session_id=session.id,
+                image_ids=[im["id"] for im in merged_images],
+            )
             db.add(
                 Message(
                     tenant_id=tenant.id,
                     session_id=session.id,
                     role=MessageRole.VISITOR,
                     content=message_text,
-                    meta=f'{{"merged": {len(buf)}}}',
+                    meta=json.dumps(
+                        {"merged": len(buf), "images": image_meta}, ensure_ascii=False
+                    ),
                 )
             )
         else:
@@ -206,7 +286,7 @@ async def send_message(
                     session_id=session.id,
                     role=MessageRole.VISITOR,
                     content=payload.message,
-                    meta="{}",
+                    meta=json.dumps({"images": image_meta}, ensure_ascii=False) if image_meta else "{}",
                 )
             )
         session.last_active_at = utcnow()
@@ -246,7 +326,8 @@ async def send_message(
             )
 
         result = await agent_mod.handle_turn(
-            db, tenant=tenant, employee=employee, session=session, message=message_text
+            db, tenant=tenant, employee=employee, session=session, message=message_text,
+            images=image_payloads or None,
         )
 
         # 连续未有效回答 → 达阈值则停止 AI 回复并转人工（PRD 3.1.5）
@@ -333,8 +414,18 @@ def history(
         "session_id": session.id,
         "status": session.status,
         "items": [
-            {"id": m.id, "role": m.role, "content": m.content, "created_at": m.created_at.isoformat()}
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "created_at": m.created_at.isoformat(),
+                "images": [
+                    {"id": i["id"], "url": chatimages.url_of(i["id"], visitor_id=visitor_id)}
+                    for i in (m.meta_data.get("images") or [])
+                    if i.get("id")
+                ],
+            }
             for m in reversed(rows)
-            if m.content
+            if m.content or (m.meta_data.get("images") or [])
         ],
     }

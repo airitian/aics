@@ -99,6 +99,23 @@ _PAGE_USER = """这是一份文档的整页扫描图，请把它转写成纯文�
 5. **看不清的一律跳过，绝不推测**。型号少认一位、参数猜一个数，比读不出来危害大得多。
 6. 只输出转写内容本身：不要开场白，不要"这是第几页"，不要代码块围栏。"""
 
+# 客户聊天图片：与文档转写的分工 —— 文档围着「全文检索」转（什么字都要），
+# 聊天围着「客户想问什么」转（铭牌、故障码、报错弹窗才是关键信息），
+# 无关细节啰嗦了反而稀释客服提示词的预算。
+_CHAT_SYSTEM = "你是客服系统的图片转写助手：客户在与客服的对话中发来了一张图片。"
+_CHAT_USER = """这是客户发给客服的图片，请为客服转写图中与咨询相关的关键信息。
+
+要求：
+1. 优先转写**文字信息**：设备铭牌/型号、参数表、故障代码、屏幕显示、报错弹窗、
+   订单/单据号等，数值与单位必须精确照抄。
+2. 图中没有文字时，客观描述可见的物体、状态与异常之处（如损坏、漏水、指示灯颜色），简洁为主。
+3. **看不清的一律如实说明，绝不推测**。型号猜错会让客服给出错误的指导。
+4. 只输出转写/描述本身：不要开场白，不要"这张图展示了"，不要代码块围栏。"""
+
+# 聊天图片介于单张插图与整页之间：铭牌/单据的文字量不大，但可能带表格，
+# 1200 偶尔截断，给到与页转写同级的余量但略低。
+_CHAT_MAX_TOKENS = 2400
+
 
 class VisionUnavailable(Exception):
     def __init__(self, message: str, detail: str = ""):
@@ -197,7 +214,8 @@ async def describe_image(
     """把一张图读成文字。失败抛 VisionUnavailable，**绝不返回推测内容**。
 
     mode="figure"：文档里的插图（默认）；mode="page"：扫描版 PDF 的整页转写，
-    用专门的逐字提示词和更高的 token 上限（整页文字远比一张插图密）。
+    用专门的逐字提示词和更高的 token 上限（整页文字远比一张插图密）；
+    mode="chat"：客户聊天发来的图，围绕「客户在问什么」转写关键信息。
     """
     breaker = _breaker()
     if breaker.is_open():
@@ -209,10 +227,14 @@ async def describe_image(
         )
 
     is_page = mode == "page"
-    system = _PAGE_SYSTEM if is_page else _SYSTEM
-    max_tokens = settings.vision_page_max_tokens if is_page else settings.vision_max_tokens
+    system = _PAGE_SYSTEM if is_page else (_CHAT_SYSTEM if mode == "chat" else _SYSTEM)
+    max_tokens = (
+        settings.vision_page_max_tokens
+        if is_page
+        else (_CHAT_MAX_TOKENS if mode == "chat" else settings.vision_max_tokens)
+    )
     b64 = base64.b64encode(data).decode()
-    prompt = _PAGE_USER if is_page else _USER
+    prompt = _PAGE_USER if is_page else (_CHAT_USER if mode == "chat" else _USER)
     if context and not is_page:
         prompt += "\n\n" + _CONTEXT_TMPL.format(context=context[:800])
     content: list[dict] = [

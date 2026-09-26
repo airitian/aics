@@ -380,6 +380,9 @@ class ChatIn(BaseModel):
     visitor_id: str = Field(min_length=1, max_length=64)
     session_id: str | None = Field(default=None, max_length=32)
     channel: str = Field(default="web", max_length=32)
+    # 本条消息携带的聊天图片（先经 /api/chat/images 上传拿 id）。
+    # 上限在 chatimages.resolve_and_transcribe 里按配置截断并校验归属。
+    image_ids: list[str] = Field(default_factory=list)
 
 
 class HitOut(BaseModel):
@@ -456,6 +459,8 @@ class PlaygroundOut(BaseModel):
 # --------------------------------------------------------------------------- #
 class TestChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
+    # 对话测试也支持带图（与线上同一套图片链路，见 /api/testchat/{eid}/images）
+    image_ids: list[str] = Field(default_factory=list)
 
 
 class TestChatOut(BaseModel):

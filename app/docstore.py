@@ -112,3 +112,44 @@ def mime_of_ext(ext: str) -> str:
         ".tif": "image/tiff",
         ".tiff": "image/tiff",
     }.get((ext or "").lower(), "application/octet-stream")
+
+
+# --------------------------------------------------------------------------- #
+# 聊天图片：客户在对话中发的图。目录结构与文档资产隔离，
+# 但共用同一套「相对路径 + 越界校验」的规则。
+# --------------------------------------------------------------------------- #
+def save_chat_image(tenant_id: str, image_id: str, ext: str, data: bytes) -> str:
+    """存客户聊天图片，返回相对路径。失败返回空串（落库继续，只是后面看不了原图）。"""
+    rel = f"chat/{tenant_id}/{image_id}{_safe_ext(ext)}"
+    try:
+        target = root() / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("聊天图片未能落盘 image=%s：%s", image_id, exc)
+        return ""
+    return rel
+
+
+def read_chat_image(rel_path: str) -> bytes:
+    """读聊天图片字节；路径非法或文件丢失都返回空 bytes，由调用方决定 404。"""
+    target = abs_path(rel_path)
+    if target is None:
+        return b""
+    try:
+        return target.read_bytes()
+    except OSError as exc:
+        logger.warning("聊天图片读取失败 path=%s：%s", rel_path, exc)
+        return b""
+
+
+def remove_chat_image(rel_path: str) -> None:
+    if not rel_path:
+        return
+    target = abs_path(rel_path)
+    if target is None:
+        return
+    try:
+        target.unlink(missing_ok=True)
+    except OSError as exc:  # noqa: BLE001
+        logger.warning("聊天图片删除失败 path=%s：%s", rel_path, exc)

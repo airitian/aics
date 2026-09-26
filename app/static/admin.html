@@ -81,6 +81,8 @@ tr:hover td{background:#101720}
 /* AI 员工测试页视角与坐席侧相反：测试者扮演访客，「我」在右、AI 在左 */
 .msg.me{background:#1a2333;align-self:flex-end;border:1px solid #22344d}
 .msg.bot{background:#1b232d;align-self:flex-start}
+.msg img.snap{max-width:180px;max-height:140px;border-radius:8px;display:block;margin:4px 0;cursor:zoom-in}
+.chip{display:flex;gap:6px;flex-wrap:wrap}
 .tc-chat{max-height:58vh;min-height:320px;border:1px solid var(--line);border-radius:var(--radius);background:#0b0f14;padding:12px}
 details>summary{cursor:pointer;list-style:none}
 details>summary::-webkit-details-marker{display:none}
@@ -1525,9 +1527,13 @@ function tcPanelHtml(opts){
       </div>
     </div>
     <div class="chat tc-chat" id="tc-chat"></div>
+    <div id="tc-chips" class="chip" style="display:none"></div>
     <div class="row" style="margin-top:10px">
-      <input id="tc-input" placeholder="输入消息，回车发送" style="flex:1" autocomplete="off"
-             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTestChat();}">
+      <input type="file" id="tc-imgfile" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" style="display:none" onchange="tcPickImages(this.files)">
+      <button onclick="document.getElementById('tc-imgfile').click()" title="发送图片">🖼</button>
+      <input id="tc-input" placeholder="输入消息，回车发送（可粘贴图片）" style="flex:1" autocomplete="off"
+             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTestChat();}"
+             onpaste="tcPasteImage(event)">
       <button class="primary" id="tc-send" onclick="sendTestChat()">发送</button>
     </div>
   </div>`;
@@ -1564,7 +1570,9 @@ async function viewTestChat(v){
 
 function tcBubble(role, content, meta){
   if (role === 'system') return `<div class="msg system">${esc(content)}</div>`;
-  if (role === 'visitor') return `<div class="msg me">${esc(content)}</div>`;
+  const imgs = (meta && meta.images || [])
+    .map(i=>`<img class="snap" src="/api/testchat/${S.employeeId}/images/${i.id}" onclick="window.open(this.src)" alt="客户图片">`).join('');
+  if (role === 'visitor') return `<div class="msg me">${imgs}${esc(content)}</div>`;
   const m = meta || {};
   // 历史消息只存了命中来源与分数（不存片段正文，避免消息表膨胀），
   // 这一轮刚返回的才有正文 —— 文案要如实说明，不能让人以为检索没命中。
@@ -1609,13 +1617,42 @@ async function loadTestChat(){
   paintTestChat();
 }
 
+/* ---- 对话测试：图片上传（与线上同一套图片链路） ---- */
+let TC_IMGS = [];   // [{id,url}] 待随下一条测试消息发送
+function tcRenderChips(){
+  const box = document.getElementById('tc-chips');
+  if (!box) return;
+  box.innerHTML = TC_IMGS.map((im,i)=>
+    '<span style="position:relative"><img class="snap" style="max-height:52px" src="'+esc(im.url)+'">'
+    +'<button style="position:absolute;top:-8px;right:-8px;padding:0 5px;font-size:11px" onclick="TC_IMGS.splice('+i+',1);tcRenderChips()">×</button></span>'
+  ).join('');
+  box.style.display = TC_IMGS.length? 'flex':'none';
+}
+async function tcPickImages(files){
+  for (const f of files){
+    if (TC_IMGS.length >= 3){ toast('一条消息最多 3 张图片','err'); break; }
+    try{
+      const fd = new FormData(); fd.append('file', f);
+      const d = await api('/api/testchat/'+S.employeeId+'/images',{method:'POST', body:fd});
+      TC_IMGS.push(d);
+    }catch(e){ toast('图片上传失败：'+e.message,'err'); }
+  }
+  tcRenderChips();
+}
+function tcPasteImage(ev){
+  const files = [...(ev.clipboardData?.files||[])].filter(f=>f.type.startsWith('image/'));
+  if (files.length){ ev.preventDefault(); tcPickImages(files); }
+}
+
 async function sendTestChat(){
   if (S.tcBusy) return;
   const el = document.getElementById('tc-input');
   const text = (el.value||'').trim();
-  if (!text) return;
+  if (!text && !TC_IMGS.length) return;
   S.tcBusy = true; el.value = '';
-  S.tcMsgs.push({role:'visitor', content:text, meta:{}});
+  const sentImgs = TC_IMGS.slice();
+  TC_IMGS = []; tcRenderChips();
+  S.tcMsgs.push({role:'visitor', content:text, meta:{images:sentImgs.map(i=>({id:i.id}))}});
   S.tcMsgs.push({role:'ai', content:'', meta:{pending:true}});
   paintTestChat();
   try{
@@ -1624,7 +1661,7 @@ async function sendTestChat(){
       S.tcSession = s.id;
     }
     const r = await api('/api/testchat/'+S.employeeId+'/sessions/'+S.tcSession+'/messages',
-      {method:'POST', body:JSON.stringify({message:text})});
+      {method:'POST', body:JSON.stringify({message:text||'（发送了图片）', image_ids:sentImgs.map(i=>i.id)})});
     S.tcMsgs[S.tcMsgs.length-1] = {role:'ai', content:r.reply, meta:{
       hits:r.hits, top_score:r.top_score, confidence:r.confidence,
       latency_ms:r.latency_ms, tokens:r.tokens,

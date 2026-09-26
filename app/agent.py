@@ -26,6 +26,7 @@ from app.embedding import EmbeddingUnavailable
 from app.llm import LLMUnavailable, chat
 from app.models import (
     AiEmployee,
+    ChatImage,
     Chunk,
     Document,
     Message,
@@ -148,7 +149,12 @@ async def _overview_fallback_hits(
 
 
 def _recent_history(db: Session, tenant_id: str, session_id: str, limit: int = 20) -> list[dict]:
-    """当前会话历史。默认 20 条 = 10 轮对话（「记住客户历史」关闭时的默认窗口）。"""
+    """当前会话历史。默认 20 条 = 10 轮对话（「记住客户历史」关闭时的默认窗口）。
+
+    客户发过图的消息：把图片转写文本追加进该轮 content —— 不这样做的话，
+    「看图回答」只发生在发图那一轮，下一轮客户问"刚才那张图里的参数"，
+    模型面对的上下文里图就凭空消失了。
+    """
     rows = (
         db.execute(
             select(Message)
@@ -159,7 +165,33 @@ def _recent_history(db: Session, tenant_id: str, session_id: str, limit: int = 2
         .scalars()
         .all()
     )
-    return [{"role": m.role, "content": m.content} for m in reversed(rows)]
+    items: list[dict] = []
+    image_ids: list[str] = []
+    for m in reversed(rows):
+        ids = [i.get("id") for i in (m.meta_data.get("images") or []) if i.get("id")]
+        image_ids.extend(ids)
+        items.append({"role": m.role, "content": m.content, "_image_ids": ids})
+    if image_ids:
+        ocr_rows = (
+            db.execute(
+                select(ChatImage).where(
+                    ChatImage.id.in_(image_ids), ChatImage.tenant_id == tenant_id
+                )
+            )
+            .scalars()
+            .all()
+        )
+        ocr_map = {r.id: r.ocr_text for r in ocr_rows if r.ocr_text}
+        for it in items:
+            texts = [ocr_map[i] for i in it.pop("_image_ids") if i in ocr_map]
+            if texts:
+                it["content"] = it["content"] + "\n" + "\n".join(
+                    f"[客户发来的图片（已转写）]\n{t}" for t in texts
+                )
+    else:
+        for it in items:
+            it.pop("_image_ids", None)
+    return items
 
 
 CROSS_SESSION_BUDGET_CHARS = 4000  # ≈2k token，防止跨会话历史把提示词预算吃穿
@@ -404,9 +436,42 @@ async def handle_turn(
     persist: bool = True,
     origin: str = "chat",
     llm_profile: str = "main",
+    images: list[dict] | None = None,
 ) -> TurnResult:
+    """一轮对话。
+
+    images：本条消息携带的聊天图片载荷（chatimages.resolve_and_transcribe 的输出）。
+    三处消费各不相同，不能共用一个字符串：
+    - 意图识别用**原文**（转写文本里的营销词/乱码会干扰辱骂广告判定）；
+    - 检索用 **原文+转写**（客户拍铭牌问故障，命中的是铭牌上的型号）；
+    - LLM 用 **原文+图片块**（让模型知道图里有什么、哪张图读不到）。
+    """
     now = utcnow()
     result = TurnResult(reply="", status=session.status)
+
+    image_note = ""
+    retrieval_extra = ""
+    if images:
+        note_lines: list[str] = []
+        ocr_texts: list[str] = []
+        for i, img in enumerate(images, start=1):
+            if img.get("ocr_status") == "ok" and img.get("ocr_text"):
+                ocr_texts.append(img["ocr_text"])
+                note_lines.append(
+                    f"[客户发来的图片 #{i}（视觉模型已转写，以下内容可信，可直接作为事实依据，"
+                    f"不要说你看不到图片）]\n{img['ocr_text']}"
+                )
+            else:
+                note_lines.append(
+                    f"[客户发来的图片 #{i}：图片识别失败，无法得知图中内容。"
+                    "若图中信息对回答必要，请如实告知客户你看不到图片内容]"
+                )
+        image_note = "\n".join(note_lines)
+        retrieval_extra = "\n".join(ocr_texts)
+    # LLM 看到的「用户这句话」：原文 + 图片转写块
+    llm_message = f"{message}\n\n{image_note}" if image_note else message
+    # 检索查询：原文 + 转写文本（不带 [图片] 标记，避免稀释 embedding）
+    retrieval_query = f"{message}\n{retrieval_extra}" if retrieval_extra else message
 
     # 0. 渠道开关：该渠道未开启 AI 接待 → 直接走人工
     # 本期界面已下线该配置；存量数据里的 channel_switch 默认全放行，判定保留仅作兼容。
@@ -516,7 +581,7 @@ async def handle_turn(
     embed_tokens = 0
     try:
         hits, embed_tokens = await retrieve(
-            db, tenant_id=tenant.id, kb_ids=kb_ids, query=message, doc_ids=doc_ids
+            db, tenant_id=tenant.id, kb_ids=kb_ids, query=retrieval_query, doc_ids=doc_ids
         )
         hits = dedupe_hits(hits)
     except VectorStoreUnavailable as exc:  # 向量库不可用：降级但不编造
@@ -557,7 +622,7 @@ async def handle_turn(
                 "请直接、如实作答，不得引入对话记录之外的任何业务事实；\n"
                 "- 若对话记录中得不出答案，只回复 NO_ANSWER 这一个词，不要有任何其他内容。"
             )
-            ctx_messages = prompting.build_messages(ctx_system, history_ctx, message)
+            ctx_messages = prompting.build_messages(ctx_system, history_ctx, llm_message)
             ctx_llm = None
             try:
                 ctx_llm = await chat(
@@ -607,7 +672,7 @@ async def handle_turn(
         # 推荐/对比；仍以 NO_ANSWER 哨兵防编造，答不了继续走原追问/兜底流程。
         if not real_hits:
             fb_hits, fb_tokens = await _overview_fallback_hits(
-                db, tenant_id=tenant.id, kb_ids=kb_ids, doc_ids=doc_ids, query=message
+                db, tenant_id=tenant.id, kb_ids=kb_ids, doc_ids=doc_ids, query=retrieval_query
             )
             if fb_hits:
                 fb_system = prompting.build_system_prompt(
@@ -622,7 +687,7 @@ async def handle_turn(
                     "- 若能据此回答用户问题（如产品推荐、对比、参数查询），请直接、如实作答；\n"
                     "- 若这些资料仍不足以回答，只回复 NO_ANSWER 这一个词，不要有任何其他内容。"
                 )
-                fb_messages = prompting.build_messages(fb_system, history_ctx, message)
+                fb_messages = prompting.build_messages(fb_system, history_ctx, llm_message)
                 fb_llm = None
                 try:
                     fb_llm = await chat(
@@ -723,7 +788,7 @@ async def handle_turn(
         visitor_language=visitor_language,
         memory_lines=memory,
     )
-    messages = prompting.build_messages(system_prompt, history, message)
+    messages = prompting.build_messages(system_prompt, history, llm_message)
 
     try:
         llm_result = await chat(

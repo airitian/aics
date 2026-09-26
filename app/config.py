@@ -163,6 +163,14 @@ class Settings(BaseSettings):
     # 换切分策略或补做 OCR 时就再也没机会了。
     assets_dir: str = "assets"
 
+    # ---------- 聊天图片：客户在对话中发图 ----------
+    # 客户上传图片 → 落盘 → 发送消息时视觉转写 → 转写文本进 prompt + 检索。
+    # 单张上限：手机拍照原图能到 8-12MB，10MB 覆盖绝大多数截图/照片，
+    # 再大的让客户裁一裁（也防几张图把回合延迟拖到分钟级）。
+    chat_image_max_bytes: int = 10 * 1024 * 1024
+    # 单条消息最多带几张图 —— 每张都要过一次视觉模型，张数直接乘在回合延迟上
+    chat_image_max_per_message: int = 3
+
     # ---------- RAG ----------
     chunk_size: int = 600
     chunk_overlap: int = 100
