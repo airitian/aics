@@ -1637,7 +1637,8 @@ async function tcPickImages(files){
     try{
       const fd = new FormData(); fd.append('file', f);
       const d = await api('/api/testchat/'+S.employeeId+'/images',{method:'POST', body:fd});
-      TC_IMGS.push(d);
+      // 上传接口返回的是 image_id 键，这里统一规范化成 {id,url}，发送时 map(i=>i.id) 才有值
+      TC_IMGS.push({id: d.image_id || d.id, url: d.url});
     }catch(e){ toast('图片上传失败：'+e.message,'err'); }
   }
   tcRenderChips();

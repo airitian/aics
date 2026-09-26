@@ -94,7 +94,7 @@ async function pickImages(files){
   if(!KEY) return alert('请先连接');
   for (const f of files){
     if(PENDING_IMGS.length >= 3){ alert('一条消息最多 3 张图片'); break; }
-    try{ PENDING_IMGS.push(await uploadOne(f)); }
+    try{ const d = await uploadOne(f); PENDING_IMGS.push({id: d.image_id || d.id, url: d.url}); }
     catch(e){ alert('图片上传失败：'+e.message); }
   }
   renderChips();
