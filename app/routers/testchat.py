@@ -18,12 +18,14 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session
 
 from app import agent as agent_mod
 from app import chatimages, prompting
@@ -196,7 +198,25 @@ def messages(
         .scalars()
         .all()
     )
-    return {"session": _session_out(row, len(rows)), "items": [_message_out(m) for m in rows]}
+    return {"session": _session_out(row, len(rows)), "items": [_signed_message(m, employee_id) for m in rows]}
+
+
+def _signed_message(m: Message, employee_id: str) -> dict:
+    """消息输出 + 给 meta.images 补签名 URL。
+
+    `<img>` 无法带认证头，历史气泡里的图片必须用带签名的链接才能显示；
+    签名 6 小时过期，重新拉一次消息列表即可续期。
+    """
+    out = _message_out(m)
+    images = (out.get("meta") or {}).get("images") or []
+    for img in images:
+        if img.get("id"):
+            img["url"] = chatimages.sign_url(
+                f"/api/testchat/{employee_id}/images/{img['id']}",
+                img["id"],
+                viewer=f"e:{employee_id}",
+            )
+    return out
 
 
 @router.post("/{employee_id}/images")
@@ -231,7 +251,9 @@ async def upload_image(
     scope.db.commit()
     return {
         "image_id": img.id,
-        "url": f"/api/testchat/{employee_id}/images/{img.id}",
+        "url": chatimages.sign_url(
+            f"/api/testchat/{employee_id}/images/{img.id}", img.id, viewer=f"e:{employee_id}"
+        ),
     }
 
 
@@ -239,18 +261,20 @@ async def upload_image(
 def get_image(
     employee_id: str,
     image_id: str,
-    tenant: Tenant = Depends(get_tenant),
-    scope: TenantScope = Depends(get_scope),
-    user: User = Depends(tester),
+    exp: int,
+    sig: str,
+    db: Session = Depends(get_db),
 ) -> Response:
-    """取回测试上传的图片原图（仅限本租户 + 本人上传的）。"""
-    _employee(scope, employee_id)
-    row = scope.db.execute(
-        select(ChatImage).where(
-            ChatImage.id == image_id,
-            ChatImage.tenant_id == tenant.id,
-            ChatImage.visitor_id == _visitor_id(user),
-        )
+    """取回测试上传的图片原图。
+
+    `<img src>` 无法携带 Authorization 头（浏览器原生请求不带自定义头），
+    因此这里不做登录态校验，改为校验签发的 HMAC 签名 + 过期时间——
+    签名由上传接口与消息列表接口在登录态内签发，未签名请求一律 404。
+    """
+    if not chatimages.verify_sig(image_id, f"e:{employee_id}", exp, sig):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="链接无效或已过期")
+    row = db.execute(
+        select(ChatImage).where(ChatImage.id == image_id)
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图片不存在")
@@ -302,6 +326,17 @@ async def send_message(
     )
     row.last_active_at = utcnow()
 
+    # ---- 延迟回复：与线上 chat 同一配置，测试里按真实延迟等待 ----
+    # 「AI 回复设置」的延迟此前只在访客链路生效，测试页永远即时回复，
+    # 测试者会误以为配置没生效。这里按真实值 sleep（仅 AI 接待中；
+    # 停止/转人工的会话即时返回，不给已停止的会话再制造等待）。
+    if row.status == SessionStatus.AI:
+        from app.routers.chat import _reply_delay_seconds  # 局部导入避免路由间装配顺序问题
+
+        delay = _reply_delay_seconds(employee)
+        if delay > 0:
+            await asyncio.sleep(delay)
+
     started = time.perf_counter()
     result = await agent_mod.handle_turn(
         db,
@@ -330,6 +365,9 @@ async def send_message(
     # 补齐「AI 实际说的话」：早退分支（无意义输入 / 低置信追问 / 转人工 /
     # 模型不可用）只写了 SYSTEM 说明。测试页靠历史回放展示对话，
     # 不补的话刷新一下就发现 AI 的兜底回复消失了 —— 测试者会以为它没回过。
+    # 拆分回复：正常回答由 handle_turn 落单条完整文本（保持 LLM 上下文完整），
+    # 分段信息在 meta.segments / result.segments；这里把它带给测试页，
+    # 前端按多条气泡渲染 —— 否则测试页永远看不到「拆分回复」的效果。
     if result.reply and not result.ai_saved:
         db.add(
             Message(
@@ -340,6 +378,11 @@ async def send_message(
             )
         )
         result.ai_saved = True
+    segments = (
+        [s for s in (result.segments or []) if s]
+        if (employee.split_reply_enabled and len(result.segments or []) > 1)
+        else []
+    )
 
     latency_ms = int((time.perf_counter() - started) * 1000)
     db.commit()
@@ -347,6 +390,7 @@ async def send_message(
     return TestChatOut(
         session_id=row.id,
         reply=result.reply,
+        segments=segments,
         status=result.status,
         handoff=result.handoff,
         handoff_reason=result.handoff_reason,

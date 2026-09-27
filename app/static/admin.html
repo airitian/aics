@@ -6,22 +6,22 @@
 <title>AICS · 多租户 AI 客服控制台</title>
 <style>
 :root{
-  --bg:#0d1117; --panel:#151b23; --panel-2:#1b232d; --line:#26303c;
-  --txt:#e6edf3; --txt-dim:#8b98a8; --accent:#7c5cff; --accent-2:#2f81f7;
-  --ok:#3fb950; --warn:#d29922; --err:#f85149; --radius:10px;
+  --bg:#f3f5f9; --panel:#ffffff; --panel-2:#f5f7fa; --line:#e6eaf1;
+  --txt:#232a35; --txt-dim:#8a94a6; --accent:#3d7bfd; --accent-2:#3d7bfd;
+  --ok:#22b07d; --warn:#b7791f; --err:#e5484d; --radius:10px;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
 a{color:var(--accent-2)}
-button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--txt);padding:7px 13px}
-button:hover{border-color:#3a4757}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--txt);padding:7px 13px}
+button:hover{border-color:#c9d2df}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-button.danger{background:transparent;border-color:#5b2b2b;color:var(--err)}
+button.danger{background:transparent;border-color:#f3c8c8;color:var(--err)}
 button.ghost{background:transparent}
 button:disabled{opacity:.5;cursor:not-allowed}
-input,select,textarea{font:inherit;background:#0b0f14;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+input,select,textarea{font:inherit;background:#fff;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
 textarea{min-height:120px;resize:vertical;font-family:var(--mono);font-size:13px;line-height:1.6}
 input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent)}
 label{display:block;font-size:12px;color:var(--txt-dim);margin:10px 0 4px}
@@ -33,21 +33,21 @@ label{display:block;font-size:12px;color:var(--txt-dim);margin:10px 0 4px}
 .small{font-size:12px}
 .mono{font-family:var(--mono)}
 .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;border:1px solid var(--line);color:var(--txt-dim)}
-.tag.ok{color:var(--ok);border-color:#20402a}
-.tag.warn{color:var(--warn);border-color:#4a3a12}
-.tag.err{color:var(--err);border-color:#5b2b2b}
-.tag.info{color:var(--accent-2);border-color:#1d3a5c}
+.tag.ok{color:var(--ok);border-color:#c9ecd6}
+.tag.warn{color:var(--warn);border-color:#f0e2b8}
+.tag.err{color:var(--err);border-color:#f3c8c8}
+.tag.info{color:var(--accent-2);border-color:#cfe1fb}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--txt-dim);font-weight:500;font-size:12px}
-tr:hover td{background:#101720}
+tr:hover td{background:#f6f8fb}
 #app{display:none;height:100%;grid-template-columns:224px 1fr}
-#side{background:#0a0e13;border-right:1px solid var(--line);padding:16px 12px;display:flex;flex-direction:column;gap:4px;overflow:auto}
-#side .brand{font-weight:700;letter-spacing:.06em;margin:4px 8px 14px;font-size:13px;color:#c7d0da}
+#side{background:#ffffff;border-right:1px solid var(--line);padding:16px 12px;display:flex;flex-direction:column;gap:4px;overflow:auto}
+#side .brand{font-weight:700;letter-spacing:.06em;margin:4px 8px 14px;font-size:13px;color:#232a35}
 #side .brand span{color:var(--accent)}
 .nav{padding:8px 10px;border-radius:8px;color:var(--txt-dim);cursor:pointer;font-size:13px;border:1px solid transparent}
-.nav:hover{background:#121922;color:var(--txt)}
-.nav.active{background:#171f2a;color:var(--txt);border-color:var(--line)}
+.nav:hover{background:#f2f5fa;color:var(--txt)}
+.nav.active{background:#eaf1fe;color:var(--accent);border-color:#d5e3ff}
 #main{overflow:auto;padding:20px 24px 60px}
 #topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap}
 #topbar h1{font-size:18px;margin:0}
@@ -68,22 +68,23 @@ tr:hover td{background:#101720}
 @media (max-width:1280px){.split3{grid-template-columns:minmax(180px,220px) minmax(0,1fr)}.split3 .tc-col{grid-column:1/-1}}
 .tc-sticky{position:sticky;top:16px}
 .list-item{padding:9px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent}
-.list-item:hover{background:#121922}
-.list-item.active{background:#171f2a;border-color:var(--line)}
+.list-item:hover{background:#f2f5fa}
+.list-item.active{background:#eaf1fe;border-color:var(--line)}
 .list-item .t{font-size:13px}
 .list-item .s{font-size:11px;color:var(--txt-dim)}
 .chat{display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow:auto;padding:4px}
 .msg{max-width:82%;padding:8px 12px;border-radius:10px;font-size:13px;white-space:pre-wrap;word-break:break-word}
-.msg.visitor{background:#1b232d;align-self:flex-start}
-.msg.ai{background:#1a2333;align-self:flex-end;border:1px solid #22344d}
-.msg.agent{background:#1f2b22;align-self:flex-end;border:1px solid #24402c}
+.msg.visitor{background:#f2f4f8;align-self:flex-start}
+.msg.ai{background:#fff;align-self:flex-end;border:1px solid var(--line)}
+.msg.agent{background:#eaf7ee;align-self:flex-end;border:1px solid #c4e6cf}
 .msg.system{align-self:center;background:transparent;border:1px dashed var(--line);color:var(--txt-dim);font-size:11px;max-width:96%}
 /* AI 员工测试页视角与坐席侧相反：测试者扮演访客，「我」在右、AI 在左 */
-.msg.me{background:#1a2333;align-self:flex-end;border:1px solid #22344d}
-.msg.bot{background:#1b232d;align-self:flex-start}
+.msg.me{background:var(--accent);border:1px solid var(--accent);color:#fff;align-self:flex-end}
+.msg.me a{color:#fff;text-decoration:underline}
+.msg.bot{background:#f2f4f8;align-self:flex-start}
 .msg img.snap{max-width:180px;max-height:140px;border-radius:8px;display:block;margin:4px 0;cursor:zoom-in}
 .chip{display:flex;gap:6px;flex-wrap:wrap}
-.tc-chat{max-height:58vh;min-height:320px;border:1px solid var(--line);border-radius:var(--radius);background:#0b0f14;padding:12px}
+.tc-chat{max-height:58vh;min-height:320px;border:1px solid var(--line);border-radius:var(--radius);background:#fbfcfe;padding:12px}
 details>summary{cursor:pointer;list-style:none}
 details>summary::-webkit-details-marker{display:none}
 details>summary::before{content:"▸ "}
@@ -98,23 +99,41 @@ details[open]>summary::before{content:"▾ "}
 /* ---- 图片缩略图（对话测试 / 待发送区）：独立类名，避免与筛选胶囊 .chip 冲突 ---- */
 .imgchips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}
 .imgchip{position:relative;width:56px;height:56px;border-radius:10px;overflow:visible;flex:none}
-.imgchip img{width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid var(--line);display:block;background:#0d1117}
+.imgchip img{width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid var(--line);display:block;background:#eef1f6}
 .imgchip img:hover{border-color:var(--accent)}
 .imgchip .rm{position:absolute;top:-7px;right:-7px;width:18px;height:18px;border-radius:50%;border:none;
-  background:#3a4757;color:#fff;font-size:12px;line-height:18px;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  background:#c9d2df;color:#fff;font-size:12px;line-height:18px;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .imgchip .rm:hover{background:var(--err)}
 .msg .imgrow{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 6px}
 
-/* ---- AI 员工编辑器：分组卡片 + iOS 风格开关 ---- */
-.fgroup{background:rgba(255,255,255,.02);border:1px solid var(--line);border-radius:10px;padding:12px 14px 8px;margin:12px 0}
-.fgroup-title{font-size:12px;font-weight:600;letter-spacing:.05em;color:var(--accent-2);margin-bottom:2px;display:flex;align-items:center;gap:6px}
-.fgroup-title .sub{font-weight:400;color:var(--txt-dim);letter-spacing:0}
-.fgroup .switch{margin:10px 0;padding:6px 8px;border-radius:8px}
-.fgroup .switch:hover{background:rgba(255,255,255,.03)}
-.switch input{appearance:none;-webkit-appearance:none;width:34px;height:19px;border-radius:999px;background:#2a3442;
+/* ---- AI 员工编辑器：参考 HelpKnow 风格 —— 白卡片分区 + 设置行 + 状态徽章 ---- */
+.estack{display:flex;flex-direction:column;gap:14px;min-width:0}
+.card-h{font-size:14px;font-weight:600;color:var(--txt);margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.card-h .sub{font-weight:400;font-size:12px;color:var(--txt-dim)}
+/* 设置行：左侧标签+问号，右侧徽章 / 开关 / 「设置 ›」 */
+.setrow{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 2px}
+.setrow .sw-txt{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--txt)}
+.setrow .sw-col{display:flex;flex-direction:column;gap:3px;min-width:0}
+.setrow .setlink{color:var(--accent);cursor:pointer;font-size:13px;white-space:nowrap;user-select:none}
+.setrow .setlink:hover{text-decoration:underline}
+.setrow .tag{flex:none}
+.setrow input[type=checkbox]{flex:none}
+/* 「AI 生成/优化」渐变胶囊按钮 */
+.ai-gen{display:inline-flex;align-items:center;gap:5px;border:1px solid #d5e3ff;border-radius:999px;
+  background:linear-gradient(90deg,#eaf1ff,#f3efff);color:var(--accent);font-size:12px;font-weight:500;
+  padding:5px 14px;cursor:pointer;white-space:nowrap}
+.ai-gen:hover{border-color:var(--accent);box-shadow:0 1px 6px rgba(61,123,253,.18)}
+/* 自动保存状态 */
+#autosave-status{font-size:12px}
+#autosave-status.saved{color:var(--ok)}
+#autosave-status.saved::before{content:'✓ '}
+#autosave-status.saving{color:var(--txt-dim)}
+/* 人设计数条 */
+.pbar{display:flex;justify-content:flex-end;margin-top:4px}
+.switch input{appearance:none;-webkit-appearance:none;width:34px;height:19px;border-radius:999px;background:#dfe5ee;
   position:relative;cursor:pointer;transition:background .18s;flex:none;margin:0}
 .switch input::after{content:'';position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
-  background:#aab6c5;transition:left .18s,background .18s}
+  background:#ffffff;transition:left .18s,background .18s}
 .switch input:checked{background:var(--accent)}
 .switch input:checked::after{left:17px;background:#fff}
 
@@ -128,28 +147,28 @@ details[open]>summary::before{content:"▾ "}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px}
 .dot.ok{background:#3fbf6f;box-shadow:0 0 4px rgba(63,191,111,.6)}
 .dot.warn{background:#e0a53a}
-pre{background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:12px;max-height:280px}
-.bar{height:6px;background:#0b0f14;border-radius:99px;overflow:hidden;border:1px solid var(--line)}
+pre{background:#fbfcfe;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:12px;max-height:280px}
+.bar{height:6px;background:#e8ecf2;border-radius:99px;overflow:hidden;border:1px solid var(--line)}
 .bar>i{display:block;height:100%;background:var(--accent)}
 /* 人设优化生成弹窗 */
-.modal-mask{position:fixed;inset:0;background:rgba(4,8,14,.6);display:flex;align-items:center;justify-content:center;z-index:60}
+.modal-mask{position:fixed;inset:0;background:rgba(17,24,39,.45);display:flex;align-items:center;justify-content:center;z-index:60}
 .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;width:min(920px,94vw);max-height:88vh;display:flex;flex-direction:column;padding:16px 20px 14px}
 .modal .tabs{display:flex;gap:20px;border-bottom:1px solid var(--line);margin:10px 0 14px}
 .modal .tab{padding:7px 2px;cursor:pointer;color:var(--txt-dim);font-size:13px;border-bottom:2px solid transparent;margin-bottom:-1px}
 .modal .tab:hover{color:var(--txt)}
 .modal .tab.active{color:var(--txt);border-bottom-color:var(--accent)}
 .chip{display:inline-block;padding:4px 13px;border:1px solid var(--line);border-radius:999px;font-size:12px;cursor:pointer;color:var(--txt-dim);user-select:none}
-.chip:hover{border-color:#3a4757;color:var(--txt)}
-.chip.active{color:var(--accent);border-color:var(--accent);background:rgba(124,92,255,.1)}
+.chip:hover{border-color:#c9d2df;color:var(--txt)}
+.chip.active{color:var(--accent);border-color:var(--accent);background:rgba(61,123,253,.08)}
 .pm-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;flex:1;overflow:hidden}
 .pm-left{overflow:auto;padding-right:6px;min-height:0}
-.pm-right{border:1px solid var(--line);border-radius:var(--radius);background:#0b0f14;display:flex;flex-direction:column;overflow:hidden}
+.pm-right{border:1px solid var(--line);border-radius:var(--radius);background:#fbfcfe;display:flex;flex-direction:column;overflow:hidden}
 .pm-right .pm-head{padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}
 .pm-right .pm-content{flex:1;overflow:auto;padding:12px 14px}
 .pm-empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--txt-dim);gap:10px;font-size:13px}
 .pm-cat{padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--txt-dim);border:1px solid transparent}
-.pm-cat:hover{background:#121922;color:var(--txt)}
-.pm-cat.active{background:#171f2a;color:var(--txt);border-color:var(--line)}
+.pm-cat:hover{background:#f2f5fa;color:var(--txt)}
+.pm-cat.active{background:#eaf1fe;color:var(--txt);border-color:var(--line)}
 .pm-tpl{border:1px solid var(--line);border-radius:var(--radius);padding:12px;background:var(--panel-2);font-size:12px;display:flex;flex-direction:column;gap:8px}
 .pm-tpl .t{font-size:13px;font-weight:600}
 .pm-tpl .d{color:var(--txt-dim);flex:1;white-space:pre-wrap;max-height:180px;overflow:hidden}
@@ -158,20 +177,20 @@ pre{background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:10
 .kb-bound{border:1px solid var(--line);border-radius:var(--radius);margin-top:6px;overflow:hidden}
 .kb-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line)}
 .kb-row:last-child{border-bottom:none}
-.kb-row:hover{background:#101720}
-.kb-icon{width:30px;height:30px;border-radius:7px;background:rgba(124,92,255,.15);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
-.kb-row .t{font-size:13px}
-.kb-row .s{font-size:11px;color:var(--txt-dim)}
+.kb-row:hover{background:#f6f8fb}
+.kb-icon{width:30px;height:30px;border-radius:7px;background:rgba(61,123,253,.12);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+.kb-row .t{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kb-row .s{font-size:11px;color:var(--txt-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kb-row>div:nth-child(2){flex:1;min-width:0}
-.kb-remove{margin-left:auto;color:var(--err);background:transparent;border:1px solid #5b2b2b;border-radius:8px;padding:3px 12px;font-size:12px;flex-shrink:0}
+.kb-remove{margin-left:auto;color:var(--err);background:transparent;border:1px solid #f3c8c8;border-radius:8px;padding:3px 12px;font-size:12px;flex-shrink:0}
 .kb-remove:hover{border-color:var(--err)}
-.kb-add{margin-left:auto;color:var(--accent-2);background:transparent;border:1px solid #1d3a5c;border-radius:8px;padding:3px 12px;font-size:12px;flex-shrink:0}
+.kb-add{margin-left:auto;color:var(--accent-2);background:transparent;border:1px solid #cfe1fb;border-radius:8px;padding:3px 12px;font-size:12px;flex-shrink:0}
 .kb-add:hover{border-color:var(--accent-2)}
 #kb-modal .modal{width:min(560px,94vw)}
 #kb-modal-list{margin-top:8px;overflow:auto;max-height:46vh}
 /* ---- 交互优化：过渡 / 动画 / 拟物开关 / 加载指示 ---- */
 button,.nav,.list-item,.chip,.kb-row,.pm-cat,.pm-tpl,input,select,textarea{transition:background .15s,border-color .15s,color .15s,box-shadow .15s}
-button:hover{box-shadow:0 1px 6px rgba(0,0,0,.25)}
+button:hover{box-shadow:0 1px 6px rgba(16,24,40,.08)}
 button:active:not(:disabled){transform:scale(.97)}
 .modal-mask{animation:maskIn .18s ease-out}
 .modal{animation:modalIn .22s cubic-bezier(.2,.9,.3,1.1)}
@@ -182,8 +201,8 @@ button:active:not(:disabled){transform:scale(.97)}
 .view-in{animation:viewIn .2s ease-out}
 @keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 /* 复选框统一渲染成拨动开关（无需改任何调用方 HTML） */
-input[type=checkbox]{appearance:none;-webkit-appearance:none;width:36px;height:20px;border-radius:999px;background:#232d3a;border:1px solid var(--line);position:relative;cursor:pointer;padding:0;flex-shrink:0}
-input[type=checkbox]::after{content:'';position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#8b98a8;transition:left .18s,background .18s}
+input[type=checkbox]{appearance:none;-webkit-appearance:none;width:36px;height:20px;border-radius:999px;background:#e3e8f0;border:1px solid var(--line);position:relative;cursor:pointer;padding:0;flex-shrink:0}
+input[type=checkbox]::after{content:'';position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:left .18s,background .18s}
 input[type=checkbox]:checked{background:var(--accent);border-color:var(--accent)}
 input[type=checkbox]:checked::after{left:18px;background:#fff}
 input[type=checkbox]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -195,7 +214,7 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--accent);outline-offse
 /* ---- 字段悬浮提示（问号图标 + 气泡） ---- */
 .tip{position:relative;display:inline-flex;width:15px;height:15px;border-radius:50%;border:1px solid var(--line);color:var(--txt-dim);font-size:10px;line-height:1;align-items:center;justify-content:center;cursor:help;flex-shrink:0;user-select:none;margin-left:2px}
 .tip:hover,.tip:focus-visible{color:var(--accent);border-color:var(--accent)}
-.tip::after{content:attr(data-tip);position:absolute;left:50%;top:calc(100% + 8px);transform:translateX(-50%);background:#1b232d;border:1px solid var(--line);color:var(--txt);padding:7px 10px;border-radius:8px;font-size:12px;line-height:1.55;white-space:normal;width:max-content;max-width:300px;text-align:left;opacity:0;pointer-events:none;transition:opacity .15s;z-index:80;box-shadow:0 6px 18px rgba(0,0,0,.45);font-weight:400}
+.tip::after{content:attr(data-tip);position:absolute;left:50%;top:calc(100% + 8px);transform:translateX(-50%);background:#fff;border:1px solid var(--line);color:var(--txt);padding:7px 10px;border-radius:8px;font-size:12px;line-height:1.55;white-space:normal;width:max-content;max-width:300px;text-align:left;opacity:0;pointer-events:none;transition:opacity .15s;z-index:80;box-shadow:0 6px 18px rgba(16,24,40,.12);font-weight:400}
 .tip::before{content:'';position:absolute;left:50%;top:calc(100% + 3px);transform:translateX(-50%);border:5px solid transparent;border-bottom-color:var(--line);opacity:0;transition:opacity .15s;z-index:80}
 .tip:hover::after,.tip:hover::before,.tip:focus-visible::after,.tip:focus-visible::before{opacity:1}
 </style>
@@ -693,7 +712,7 @@ function empAvatarColor(name){
   return palette[h % palette.length];
 }
 function sw(id,label,checked,tipText){
-  return `<div class="switch"><input type="checkbox" id="${id}" ${checked?'checked':''}><label for="${id}" style="margin:0">${label}</label>${tipText?tip(tipText):''}</div>`;
+  return `<div class="setrow"><span class="sw-txt"><label for="${id}" style="margin:0;color:var(--txt);font-size:13px;cursor:pointer">${label}</label>${tipText?tip(tipText):''}</span><input type="checkbox" id="${id}" ${checked?'checked':''}></div>`;
 }
 function editorHtml(e){
   S.editorDocIds = [...(e.doc_ids||[])];
@@ -725,84 +744,103 @@ function editorHtml(e){
     }
   }, 0);
   ensureDocs().then(()=>paintDocBound());
-  return `<div class="card" id="emp-editor">
-    <div class="row" style="justify-content:space-between">
-      <h3 style="margin:0">${esc(e.name)} <span class="tag ${e.status==='published'?'ok':'warn'}">${e.status==='published'?('已发布 v'+e.published_version):'草稿'}</span></h3>
-      <div class="row">
-        <span class="small muted" id="autosave-status"></span>
-        <button class="primary" onclick="publishEmployee(this)">发布</button>
-        <button onclick="loadVersions()">版本</button>
+  const stopOn = !!S.stopState.enabled;
+  return `<div class="estack" id="emp-editor">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="row" style="gap:10px">
+          <span class="emp-avatar" style="background:${empAvatarColor(e.name)};width:38px;height:38px;font-size:16px">${esc((e.name||'?').slice(0,1))}</span>
+          <div>
+            <div style="font-weight:600;font-size:15px">${esc(e.name)} <span class="tag ${e.status==='published'?'ok':'warn'}">${e.status==='published'?('已发布 v'+e.published_version):'草稿'}</span></div>
+            <span class="muted" id="autosave-status" style="display:none"></span>
+          </div>
+        </div>
+        <div class="row">
+          <button onclick="loadVersions()">版本</button>
+          <button class="primary" onclick="publishEmployee(this)">发布</button>
+        </div>
+      </div>
+      <div id="publish-result"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">基础配置 <span class="sub">名称 · 语言 · 模型参数</span></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>名称</label><input id="f-name" value="${esc(e.name)}"></div>
+        <div><label>输出语言 ${tip('AI 回复使用的语言；「auto」跟随客户消息语言')}</label>
+          <select id="f-lang">${['auto','zh-CN','zh-TW','en','ja','ko','ru','es','pt','fr','de','ar','th','vi','id']
+            .map(l=>`<option value="${l}" ${e.output_language===l?'selected':''}>${l}</option>`).join('')}</select></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:2px">
+        <div><label>温度 (0-100)</label><input id="f-temp" type="number" min="0" max="100" value="${e.llm_temperature}"></div>
+        <div><label>最大输出 tokens</label><input id="f-maxtok" type="number" min="1" max="4096" value="${e.llm_max_tokens}"></div>
+      </div>
+      ${sw('f-fast','快速模式（速度优先）',e.fast_mode)}
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-weight:600;font-size:14px">人设（system prompt）${tip('决定 AI 的角色、语气与行为边界；可先用「AI 生成/优化」生成初稿，再手工调整')}</span>
+        <button class="ai-gen" onclick="openPersonaModal()">✨ AI 生成/优化</button>
+      </div>
+      <textarea id="f-persona" oninput="countPersona()" style="min-height:220px">${esc(e.persona)}</textarea>
+      <div class="pbar"><span class="counter" id="persona-counter"></span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">对话策略 <span class="sub">答不准时怎么兜</span></div>
+      <label>低置信度策略</label>
+      <select id="f-policy">
+        <option value="clarify" ${e.low_confidence_policy==='clarify'?'selected':''}>先追问澄清，超过轮次转人工</option>
+        <option value="handoff" ${e.low_confidence_policy==='handoff'?'selected':''}>直接转人工</option>
+        <option value="fallback" ${e.low_confidence_policy==='fallback'?'selected':''}>兜底话术回复</option>
+      </select>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr;margin-top:2px">
+        <div><label>置信度阈值 (0-100)</label><input id="f-conf" type="number" min="0" max="100" value="${e.confidence_threshold}"></div>
+        <div><label>澄清轮次 (0-3)</label><input id="f-clarify" type="number" min="0" max="3" value="${e.clarify_rounds}"></div>
+        <div><label>未有效回答阈值 (1-10)</label><input id="f-stop" type="number" min="1" max="10" value="${e.auto_stop_threshold}"></div>
+      </div>
+      ${sw('f-autostop','未有效回答自动转人工',e.auto_stop_enabled,'连续 N 次未有效回答后转人工，N 取上方阈值')}
+      <div class="setrow">
+        <span class="sw-col">
+          <span class="sw-txt">自动停止回复 ${tip('触发后本会话不再回复，新会话自动恢复；与「未有效回答转人工」互相独立')}</span>
+          <span class="small muted" id="stop-summary"></span>
+        </span>
+        <span class="row" style="gap:8px;margin:0">
+          <span class="tag ${stopOn?'ok':''}" id="stop-chip">${stopOn?'已开启':'未开启'}</span>
+          <span class="setlink" onclick="openStopModal()">设置 ›</span>
+        </span>
+      </div>
+      <div class="setrow">
+        <span class="sw-col">
+          <span class="sw-txt">AI 回复设置 ${tip('延迟回复：等待期内客户连发的消息会合并成一条统一回复。拆分只对较长回答生效；拆成多条仍按 1 次回复计费。访客聊天与对话测试均按此真实生效（延迟按配置等待）。')}</span>
+          <span class="small muted" id="reply-summary"></span>
+        </span>
+        <span class="setlink" onclick="openReplyModal()">设置 ›</span>
       </div>
     </div>
-    <div id="publish-result"></div>
-    <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:12px">
-      <div>
-        <label>名称</label><input id="f-name" value="${esc(e.name)}">
-        <label style="display:flex;justify-content:space-between;align-items:center">人设（system prompt）<button class="ghost small" onclick="openPersonaModal()" style="padding:3px 10px">✨ 人设优化生成</button></label>
-        <textarea id="f-persona" oninput="countPersona()">${esc(e.persona)}</textarea>
-        <div class="counter" id="persona-counter"></div>
-      </div>
-      <div>
-        <div class="fgroup">
-          <div class="fgroup-title">🎛 基础参数 <span class="sub">模型行为的基本盘</span></div>
-          <div class="row">
-            <div style="flex:1"><label>输出语言</label>
-              <select id="f-lang">${['auto','zh-CN','zh-TW','en','ja','ko','ru','es','pt','fr','de','ar','th','vi','id']
-                .map(l=>`<option value="${l}" ${e.output_language===l?'selected':''}>${l}</option>`).join('')}</select></div>
-            <div style="flex:1"><label>温度 (0-100)</label><input id="f-temp" type="number" min="0" max="100" value="${e.llm_temperature}"></div>
-            <div style="flex:1"><label>最大输出 tokens</label><input id="f-maxtok" type="number" min="1" max="4096" value="${e.llm_max_tokens}"></div>
-          </div>
-        </div>
 
-        <div class="fgroup">
-          <div class="fgroup-title">🎯 对话策略 <span class="sub">答不准时怎么兜</span></div>
-          <label>低置信度策略</label>
-          <select id="f-policy">
-            <option value="clarify" ${e.low_confidence_policy==='clarify'?'selected':''}>先追问澄清，超过轮次转人工</option>
-            <option value="handoff" ${e.low_confidence_policy==='handoff'?'selected':''}>直接转人工</option>
-            <option value="fallback" ${e.low_confidence_policy==='fallback'?'selected':''}>兜底话术回复</option>
-          </select>
-          <div class="row">
-            <div style="flex:1"><label>置信度阈值 (0-100)</label><input id="f-conf" type="number" min="0" max="100" value="${e.confidence_threshold}"></div>
-            <div style="flex:1"><label>澄清轮次 (0-3)</label><input id="f-clarify" type="number" min="0" max="3" value="${e.clarify_rounds}"></div>
-            <div style="flex:1"><label>连续未有效回答阈值 (1-10)</label><input id="f-stop" type="number" min="1" max="10" value="${e.auto_stop_threshold}"></div>
-          </div>
-          ${sw('f-autostop','未有效回答自动转人工（连续 N 次未有效回答后转人工）',e.auto_stop_enabled)}
-          <label style="margin-top:10px"><b>自动停止回复</b> ${tip('触发后本会话不再回复，新会话自动恢复；与「未有效回答转人工」互相独立')}</label>
-          <div class="row" style="align-items:center;margin-top:4px">
-            <div style="flex:1"><span class="muted small" id="stop-summary"></span></div>
-            <button class="ghost small" onclick="openStopModal()">设置</button>
-          </div>
-        </div>
-
-        <div class="fgroup">
-          <div class="fgroup-title">⚡ 能力开关</div>
-          ${sw('f-fast','快速模式（速度优先）',e.fast_mode)}
-          ${sw('f-memory','记住客户历史（跨会话连贯服务）',e.memory_enabled,'开启=记住该客户跨会话的历史对话；关闭=仅记住当前会话最近 10 轮')}
-          ${sw('f-group','群聊回复',e.group_reply_enabled,'依赖企微 / Telegram / WhatsApp 群聊渠道接入；本期为预留开关，渠道接入后生效')}
-          ${sw('f-asr','语音识别',e.asr_enabled)}
-          ${sw('f-time','获取当前时间',e.time_enabled)}
-        </div>
-
-        <div class="fgroup">
-          <div class="fgroup-title">💬 AI 回复设置 <span class="sub">拟人 / 延迟 / 拆分 / 兜底</span> ${tip('延迟回复：等待期内客户连发的消息会合并成一条统一回复。拆分只对较长回答生效；拆成多条仍按 1 次回复计费。')}</div>
-          <div class="row" style="align-items:center;margin-top:4px">
-            <div style="flex:1"><span class="muted small" id="reply-summary"></span></div>
-            <button class="ghost small" onclick="openReplyModal()">设置</button>
-          </div>
-        </div>
-
-        <label style="display:flex;justify-content:space-between;align-items:center"><span>知识（AI 的检索范围）${tip('两种用法二选一：① 推荐——到「知识库」页勾选整库，之后新上传的文件自动参与检索；② 这里逐个勾选文件（静态清单，新上传的文件不会自动加入，需要手动勾选）。若两边都勾了，以知识库为准。改动自动保存，「发布」后生效。')}</span>
-          <span class="row" style="gap:6px;margin:0">
-            <button class="ghost small" onclick="gotoKbPage()" style="padding:3px 10px;color:var(--accent-2)">上传文件</button>
-            <button class="ghost small" onclick="openDocModal()" style="padding:3px 10px">＋ 选择文件</button>
-          </span></label>
-        <div id="kb-bound" class="kb-bound"></div>
-      </div>
+    <div class="card">
+      <div class="card-h">能力开关</div>
+      ${sw('f-memory','记住客户历史',e.memory_enabled,'开启=记住该客户跨会话的历史对话；关闭=仅记住当前会话最近 10 轮')}
+      ${sw('f-group','群聊回复',e.group_reply_enabled,'依赖企微 / Telegram / WhatsApp 群聊渠道接入；本期为预留开关，渠道接入后生效')}
+      ${sw('f-asr','语音识别',e.asr_enabled)}
+      ${sw('f-time','获取当前时间',e.time_enabled)}
     </div>
-    <div class="row" style="margin-top:14px">
-      <span class="hint" style="margin:0">改动自动保存为草稿；点「发布」并确认后才对线上生效</span></div>
-    <div id="versions" style="margin-top:14px"></div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-weight:600;font-size:14px">知识 ${tip('两种用法二选一：① 推荐——到「知识库」页勾选整库，之后新上传的文件自动参与检索；② 这里逐个勾选文件（静态清单，新上传的文件不会自动加入，需要手动勾选）。若两边都勾了，以知识库为准。改动自动保存，「发布」后生效。')}</span>
+        <span class="row" style="gap:6px;margin:0">
+          <span class="setlink" onclick="gotoKbPage()">上传文件</span>
+          <button class="ghost small" onclick="openDocModal()" style="padding:3px 10px">＋ 选择文件</button>
+        </span>
+      </div>
+      <div id="kb-bound" class="kb-bound"></div>
+    </div>
+
+    <div class="hint" style="margin:0">改动自动保存为草稿；点「发布」并确认后才对线上生效</div>
+    <div id="versions"></div>
   </div>`;
 }
 function countPersona(){
@@ -1262,6 +1300,13 @@ const STOP_COND_LABELS = {ai_rounds:'AI回复轮次(单会话)', visitor_msgs:'�
 function _stopBackup(){ return JSON.stringify({enabled:S.stopState.enabled, message:S.stopState.message, groups:S.stopState.groups, timeEnabled:S.stopState.timeEnabled}); }
 function paintStopSummary(){
   const el = document.getElementById('stop-summary');
+  const chip = document.getElementById('stop-chip');
+  if (chip){
+    const on = !!(S.stopState && S.stopState.enabled);
+    chip.textContent = on ? '已开启' : '未开启';
+    chip.className = 'tag' + (on ? ' ok' : '');
+  }
+  if(!el || !S.stopState) return;
   if(!el || !S.stopState) return;
   const parts = [];
   const gcount = (S.stopState.groups||[]).filter(g=>g.length).length;
@@ -1360,7 +1405,11 @@ function setStopTime(i,key,v){ S.stopRules[i][key]=v; scheduleAutoSave(); }
 let _saveTimer = null, _saving = false, _dirty = false;
 function setAutosaveStatus(t){
   const el = document.getElementById('autosave-status');
-  if (el){ el.textContent = t || ''; el.style.display = t ? '' : 'none'; }
+  if (el){
+    el.textContent = t || ''; el.style.display = t ? '' : 'none';
+    el.classList.toggle('saved', /^已自动保存/.test(t||''));
+    el.classList.toggle('saving', t==='保存中…');
+  }
 }
 function scheduleAutoSave(){
   if (!S.employeeId) return;
@@ -1392,7 +1441,7 @@ async function publishEmployee(btn){
       await api('/api/employees/'+S.employeeId,{method:'PATCH',body:JSON.stringify(collectEmployee())});
       let r = await api('/api/employees/'+S.employeeId+'/publish',{method:'POST',body:JSON.stringify({force:false})});
       if (!r.ok && (r.blocked||[]).length){
-        document.getElementById('publish-result').innerHTML = '<div class="card" style="margin-top:10px;border-color:#5b2b2b"><b style="color:var(--err)">发布被阻断</b><ul class="small">'+r.blocked.map(b=>'<li>'+esc(b)+'</li>').join('')+'</ul></div>';
+        document.getElementById('publish-result').innerHTML = '<div class="card" style="margin-top:10px;border-color:#f3c8c8"><b style="color:var(--err)">发布被阻断</b><ul class="small">'+r.blocked.map(b=>'<li>'+esc(b)+'</li>').join('')+'</ul></div>';
         return;
       }
       if (!r.ok){
@@ -1628,7 +1677,7 @@ async function viewTestChat(v){
 function tcBubble(role, content, meta){
   if (role === 'system') return `<div class="msg system">${esc(content)}</div>`;
   const imgs = (meta && meta.images || [])
-    .map(i=>`<img class="snap" src="/api/testchat/${S.employeeId}/images/${i.id}" onclick="window.open(this.src)" alt="客户图片">`).join('');
+    .map(i=>`<img class="snap" src="${esc(i.url || ('/api/testchat/'+S.employeeId+'/images/'+i.id))}" onclick="window.open(this.src)" alt="客户图片">`).join('');
   if (role === 'visitor') return `<div class="msg me">${imgs}${esc(content)}</div>`;
   const m = meta || {};
   // 历史消息只存了命中来源与分数（不存片段正文，避免消息表膨胀），
@@ -1668,7 +1717,14 @@ async function loadTestChat(){
   S.tcMsgs = [];
   if (S.tcSession){
     const d = await api('/api/testchat/'+S.employeeId+'/sessions/'+S.tcSession+'/messages').catch(()=>null);
-    if (d) S.tcMsgs = (d.items||[]).filter(m=>m.content);
+    if (d){
+      // 拆分回复：落库是单条完整文本（meta.segments 记录分段），回放时展开成多条气泡
+      (d.items||[]).filter(m=>m.content).forEach(m=>{
+        const segs = (m.meta && m.role==='ai' && m.meta.segments && m.meta.segments.length>1)? m.meta.segments : null;
+        if (segs) segs.forEach((seg,i)=>S.tcMsgs.push({role:'ai', content:seg, meta:i===segs.length-1? Object.assign({}, m.meta, {segments:null}) : {}}));
+        else S.tcMsgs.push(m);
+      });
+    }
     else S.tcSession = null;   // 会话已被清掉，回到空态
   }
   paintTestChat();
@@ -1720,11 +1776,20 @@ async function sendTestChat(){
     }
     const r = await api('/api/testchat/'+S.employeeId+'/sessions/'+S.tcSession+'/messages',
       {method:'POST', body:JSON.stringify({message:text||'（发送了图片）', image_ids:sentImgs.map(i=>i.id)})});
-    S.tcMsgs[S.tcMsgs.length-1] = {role:'ai', content:r.reply, meta:{
-      hits:r.hits, top_score:r.top_score, confidence:r.confidence,
-      latency_ms:r.latency_ms, tokens:r.tokens,
-      handoff:r.handoff, handoff_reason:r.handoff_reason,
-      degraded:r.degraded, degrade_reason:r.degrade_reason}};
+    if (r.status==='stopped' && !r.reply){
+      // 自动停止回复已触发：明确提示，而不是显示一条莫名其妙的「空回复」
+      S.tcMsgs[S.tcMsgs.length-1] = {role:'system', content:'本会话已自动停止回复（达到配置的停止条件）。点「新会话」开始新一轮测试。', meta:{}};
+    } else {
+      // 拆分回复：多条分段各占一条气泡（命中信息挂在最后一条上）
+      const segs = (r.segments && r.segments.length>1)? r.segments : [r.reply];
+      const mk = (seg,i)=>({role:'ai', content:seg, meta:Object.assign({},
+        i===segs.length-1?{hits:r.hits, top_score:r.top_score, confidence:r.confidence,
+          latency_ms:r.latency_ms, tokens:r.tokens,
+          handoff:r.handoff, handoff_reason:r.handoff_reason,
+          degraded:r.degraded, degrade_reason:r.degrade_reason}:{},
+        segs.length>1?{segment:i+1, segments:segs.length}:{})});
+      S.tcMsgs.splice(S.tcMsgs.length-1, 1, ...segs.map(mk));
+    }
   }catch(e){
     S.tcMsgs[S.tcMsgs.length-1] = {role:'system', content:'发送失败：'+e.message, meta:{}};
   }finally{

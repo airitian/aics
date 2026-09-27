@@ -128,14 +128,20 @@ async def upload_image(
 def get_image(
     image_id: str,
     visitor_id: str,
-    ctx: WidgetContext = Depends(get_widget_context),
+    exp: int,
+    sig: str,
     db: Session = Depends(get_db),
 ) -> Response:
-    """取回聊天图片原图。访客只能取自己的图（同会话回放需要）。"""
+    """取回聊天图片原图。访客只能取自己的图（同会话回放需要）。
+
+    `<img src>` 无法携带 X-Widget-Key 头，因此这里不做请求头认证，
+    改为校验 chatimages.sign_url 签发的 HMAC 签名 + 过期时间。
+    """
+    if not chatimages.verify_sig(image_id, f"v:{visitor_id}", exp, sig):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="链接无效或已过期")
     row = db.execute(
         select(ChatImage).where(
             ChatImage.id == image_id,
-            ChatImage.tenant_id == ctx.tenant.id,
             ChatImage.visitor_id == visitor_id,
         )
     ).scalar_one_or_none()

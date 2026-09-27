@@ -473,6 +473,7 @@ class TestChatOut(BaseModel):
 
     session_id: str
     reply: str
+    segments: list[str] = Field(default_factory=list)  # 拆分回复：多条分段（未启用拆分时为空）
     status: str
     handoff: bool = False
     handoff_reason: str = ""

@@ -52,6 +52,7 @@ footer input{flex:1}
     <b id="title">—</b>
     <span class="badge" id="mode">—</span>
     <span class="badge" id="sid">—</span>
+    <button id="newbtn" class="badge" style="display:none;cursor:pointer;background:transparent;color:var(--accent);border-color:var(--accent)" onclick="newSession()">＋ 新会话</button>
   </header>
   <div id="chat"></div>
   <div class="imgchips" id="chips" style="display:none"></div>
@@ -170,7 +171,8 @@ async function send(){
     if(!res.ok) throw new Error(data.detail||('HTTP '+res.status));
     SID = data.session_id;
     document.getElementById('sid').textContent = '会话 ' + SID.slice(0,8);
-    document.getElementById('mode').textContent = data.handoff? '已转人工' : 'AI 接待中';
+    document.getElementById('mode').textContent =
+      data.status==='stopped' ? '会话已结束' : (data.handoff? '已转人工' : 'AI 接待中');
     if (data.reply) {
       hideTyping();
       const extra = (data.hits||[]).length? ('命中 '+data.hits.length+' 个知识片段，最高相关度 '+data.hits[0].score) : (data.degraded? ('降级：'+data.degrade_reason) : '未命中知识片段');
@@ -181,11 +183,29 @@ async function send(){
         setTimeout(()=>bubble('ai', seg, i===segs.length-1? extra:''), i*interval);
       });
     }
+    // 自动停止回复已触发：明确告知，而不是让访客对着「正在输入…」干等
+    if (data.status === 'stopped') {
+      hideTyping();
+      bubble('system', '本会话已结束，AI 停止回复。点击右上「新会话」可重新开始咨询。');
+      document.getElementById('newbtn').style.display = '';
+    } else {
+      document.getElementById('newbtn').style.display = 'none';
+    }
     // reply 为空且未转人工：可能是延迟聚合窗口内的中间请求（回复由最后一条消息的请求返回），保持「正在输入」
-    if (!data.reply && !data.handoff && !data.degraded) { /* keep typing */ }
+    if (!data.reply && !data.handoff && !data.degraded && data.status !== 'stopped') { /* keep typing */ }
     else if (!data.reply) hideTyping();
     if (data.handoff) bubble('system', '已转入人工队列' + (data.handoff_reason? '（'+data.handoff_reason+'）':''));
   }catch(e){ hideTyping(); bubble('system','发送失败：'+e.message); }
+}
+
+/* 开始新会话：清掉当前会话引用，下一条消息自动创建新会话（停止状态随之解除） */
+function newSession(){
+  SID = null;
+  document.getElementById('chat').innerHTML = '';
+  document.getElementById('sid').textContent = '新会话';
+  document.getElementById('mode').textContent = 'AI 接待中';
+  document.getElementById('newbtn').style.display = 'none';
+  if (CONFIG) bubble('ai', CONFIG.greeting);
 }
 </script>
 </body>

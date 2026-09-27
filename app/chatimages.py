@@ -117,7 +117,47 @@ def meta_images(payloads: list[dict]) -> list[dict]:
 
 
 def url_of(image_id: str, *, visitor_id: str = "") -> str:
-    """挂件侧图片 URL；后台侧用 /api/testchat 的图端点，由后台自己拼。"""
+    """挂件侧图片 URL；后台侧用 /api/testchat 的图端点，由后台自己拼。
+
+    `<img src>` 发不了自定义认证头，所以图片读取走**带签名的临时链接**
+    （HMAC 绑定查看者 + 过期时间），未签名的请求一律 404。
+    """
     from urllib.parse import quote
 
-    return f"/api/chat/images/{image_id}?visitor_id={quote(visitor_id)}"
+    path = f"/api/chat/images/{image_id}?visitor_id={quote(visitor_id)}"
+    return sign_url(path, image_id, viewer=f"v:{visitor_id}")
+
+
+# ---------------------------------------------------------------------------
+# 签名图片链接：<img> 无法携带认证头，改用 HMAC 签名 + 过期时间的临时授权
+# ---------------------------------------------------------------------------
+IMAGE_URL_TTL = 6 * 3600  # 一张图 6 小时内可看；会话回放足够，泄露窗口有限
+
+
+def _sig(image_id: str, viewer: str, exp: int) -> str:
+    import hashlib
+    import hmac
+
+    msg = f"{image_id}|{viewer}|{exp}".encode()
+    return hmac.new(settings.jwt_secret.encode(), msg, hashlib.sha256).hexdigest()[:40]
+
+
+def sign_url(path: str, image_id: str, *, viewer: str, ttl: int = IMAGE_URL_TTL) -> str:
+    import time
+
+    exp = int(time.time()) + ttl
+    sep = "&" if "?" in path else "?"
+    return f"{path}{sep}exp={exp}&sig={_sig(image_id, viewer, exp)}"
+
+
+def verify_sig(image_id: str, viewer: str, exp: int | str, sig: str | None) -> bool:
+    import hmac as _hmac
+    import time
+
+    try:
+        exp_i = int(exp)
+    except (TypeError, ValueError):
+        return False
+    if exp_i < int(time.time()) or not sig:
+        return False
+    return _hmac.compare_digest(_sig(image_id, viewer, exp_i), str(sig))
