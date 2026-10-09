@@ -143,23 +143,39 @@ def _ensure_payload_indexes(client: Any, collection: str) -> None:
 def _purge_llama_points(tenant_id: str, extra: dict[str, str]) -> None:
     """按 payload 条件删 llama 集合的点（flat_metadata 字段在顶层）。
 
-    集合还不存在 = 必然没有点，直接跳过（否则 delete 404 会让文档删除整条 500）。
+    两条「必须吞掉异常」的理由，都是为了让删除接口不要 500：
+
+    1. 集合还不存在 = 必然没有点，直接跳过（否则 delete 404 会让文档删除整条 500）。
+    2. **Qdrant 不可达也不能拦下删除**。本实例在公网（Qdrant Cloud），
+       一次 TLS 抖动（UNEXPECTED_EOF_WHILE_READING）就会让 `llama_vector_store()`
+       构造或 delete 直接抛异常 —— 而删除走的是「先 purge 向量、再 commit SQLite」，
+       异常一路冒到路由层就是 500，**SQLite 事务不提交，文档原封不动留在列表里**，
+       用户看到的是「删除失败」且反复重试永远失败。
+       向量清理失败只留下孤儿点，而检索侧本来就有 SQLite 双保险
+       （见 retrieve：命中 chunk_id 必须在 chunks 表里查得到，否则丢弃），
+       孤儿点永远不会被召回。所以「删不掉的向量」远比「删不掉的文档」无害 ——
+       这里必须降级为告警，把删除本身让出去。
     """
     from qdrant_client import models
 
-    store = llama_vector_store()
-    if not store._client.collection_exists(store.collection_name):
-        return
-    must = [models.FieldCondition(key="tenant_id", match=models.MatchValue(value=tenant_id))]
-    for key, value in extra.items():
-        must.append(models.FieldCondition(key=key, match=models.MatchValue(value=value)))
-    _QdrantFlaky.call(
-        "delete_by_filter",
-        store._client.delete,
-        collection_name=store.collection_name,
-        points_selector=models.FilterSelector(filter=models.Filter(must=must)),
-        wait=True,
-    )
+    try:
+        store = llama_vector_store()
+        if not store._client.collection_exists(store.collection_name):
+            return
+        must = [models.FieldCondition(key="tenant_id", match=models.MatchValue(value=tenant_id))]
+        for key, value in extra.items():
+            must.append(models.FieldCondition(key=key, match=models.MatchValue(value=value)))
+        _QdrantFlaky.call(
+            "delete_by_filter",
+            store._client.delete,
+            collection_name=store.collection_name,
+            points_selector=models.FilterSelector(filter=models.Filter(must=must)),
+            wait=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - 向量清理失败不能连累文档删除
+        logger.warning(
+            "llama 集合向量清理失败（已跳过，SQLite 侧照常删除）filter=%s：%s", extra, exc
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -540,27 +556,57 @@ async def retrieve(
     recall_ms = min(ms, settings.rerank_recall_min_score) if two_stage else ms
     final_ms = settings.rerank_min_score if two_stage else ms
 
-    store = llama_vector_store()
-    filters = _scope_filters(tenant_id, kb_ids, doc_ids)
-    vec_ret = AicsVectorRetriever(
-        store=store, filters=filters, top_k=recall_k * 3, min_score=recall_ms
-    )
-    retrievers: list[BaseRetriever] = [vec_ret]
+    # 向量路可用性探测。
+    # 为什么必须单独探：llama_vector_store() 的**构造阶段**就联网（QdrantVectorStore
+    # init 内部做集合探测与 index 升级），而熔断器只包住了 _QdrantFlaky.call，覆盖不到
+    # 构造期。Qdrant Cloud 走公网（曾经配在 sa-east-1，从国内被主动 RST 阻断），这里
+    # 一抛，整条检索连同 BM25 路一起陪葬，客户收到"没查到资料"——但那份资料明明在
+    # SQLite 里。BM25 路的语料来自 SQLite（本地唯一真源），向量路挂了它必须能独立顶上。
+    vec_ret: AicsVectorRetriever | None = None
+    try:
+        store = llama_vector_store()
+        vec_ret = AicsVectorRetriever(
+            store=store, filters=_scope_filters(tenant_id, kb_ids, doc_ids),
+            top_k=recall_k * 3, min_score=recall_ms,
+        )
+    except Exception as exc:  # noqa: BLE001 - 向量路不可用不能连累 BM25 路
+        logger.warning(
+            "llama 向量库不可用，本轮降级为纯 BM25 检索（SQLite 本地语料，不受影响）：%s", exc
+        )
+
     bm = _bm25_retriever(
         db, tenant_id=tenant_id, kb_ids=kb_ids, doc_ids=doc_ids, top_k=recall_k
     )
-    if bm is not None:
-        retrievers.append(bm)
+    retrievers: list[BaseRetriever] = [r for r in (vec_ret, bm) if r is not None]
+    if not retrievers:
+        raise VectorStoreUnavailable(
+            "向量检索服务暂时不可用，请稍后重试",
+            detail="向量路与 BM25 路均不可用（llama 引擎）",
+        )
 
-    fusion = QueryFusionRetriever(
-        retrievers,
-        similarity_top_k=recall_k,
-        num_queries=1,          # 查询改写属 P3，标准件已就位（>1 即启用）
-        mode=FUSION_MODES.RECIPROCAL_RANK,  # 0.14 默认是 SIMPLE，必须显式指定 RRF
-        use_async=True,
-        verbose=False,
-    )
-    fused = await fusion.aretrieve(qb)
+    if len(retrievers) == 1:
+        # 单路无需融合：少一层黑盒，也避免融合器「全有或全无」把唯一能跑的那路放大成失败
+        fused = await retrievers[0].aretrieve(qb)
+    else:
+        fusion = QueryFusionRetriever(
+            retrievers,
+            similarity_top_k=recall_k,
+            num_queries=1,          # 查询改写属 P3，标准件已就位（>1 即启用）
+            mode=FUSION_MODES.RECIPROCAL_RANK,  # 0.14 默认是 SIMPLE，必须显式指定 RRF
+            use_async=True,
+            verbose=False,
+        )
+        try:
+            fused = await fusion.aretrieve(qb)
+        except Exception as exc:  # noqa: BLE001 - 融合器任一路抛异常就炸全链，必须单路兜底
+            logger.warning("RRF 融合异常（%s），改用单路检索结果", exc)
+            fused = []
+            for retriever in retrievers:
+                try:
+                    fused = await retriever.aretrieve(qb)
+                    break
+                except Exception:  # noqa: BLE001 - 换下一路试
+                    logger.warning("单路检索失败，跳过：%s", type(retriever).__name__)
 
     # 融合结果 → SQLite 双保险校验 → RetrievedChunk
     ids_hex = [_chunk_id_from_node(n.node.node_id) for n in fused]
@@ -646,6 +692,16 @@ async def retrieve(
         # 重排不可用：融合分是 RRF 排名量纲（≈1/(60+rank)），与置信度阈值量纲
         # 不通，不能像 legacy 那样拿融合分按 ms 收紧——必须回取向量路的原始
         # 相似度分（复用同一 QueryBundle，embedding 不重算，只多一次 Qdrant 查询）。
+        # 向量路本身不可用时没有余弦分可回取：此时 out 已是 BM25 结果（bm25s 分数量纲，
+        # 与余弦阈值 ms 同样不通），只能原样放行，不能套用向量阈值误杀。
+        if vec_ret is None:
+            logger.warning(
+                "重排与向量路均不可用：放行 %d 条 BM25 候选（不套用余弦阈值）", len(out)
+            )
+            return _service_supplement(
+                db, tenant_id=tenant_id, kb_ids=kb_ids, doc_ids=doc_ids,
+                query=query, merged=_merge_pinned(pinned, out, k),
+            ), tokens
         coarse = await vec_ret.aretrieve(qb)
         fb: list[RetrievedChunk] = []
         fb_seen: set[str] = set()

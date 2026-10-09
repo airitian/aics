@@ -306,7 +306,13 @@ def purge_document(db: Session, tenant_id: str, doc_id: str) -> int:
     if _use_llama_engine():
         return _llama_engine().purge_document(db, tenant_id, doc_id)
     store = build_vector_store(db)
-    removed = store.delete_by_doc(tenant_id, doc_id)
+    try:
+        removed = store.delete_by_doc(tenant_id, doc_id)
+    except Exception as exc:  # noqa: BLE001 - 向量清理失败不能连累文档删除
+        # 与 llama 引擎同一取舍：孤儿点永远召不回来（retrieve 有 SQLite 双保险），
+        # 但让异常冒到路由层会导致删除整条 500、文档永远删不掉。
+        logger.warning("向量清理失败（已跳过，SQLite 侧照常删除）doc=%s：%s", doc_id, exc)
+        removed = 0
     rows = db.execute(
         select(Chunk).where(Chunk.tenant_id == tenant_id, Chunk.doc_id == doc_id)
     ).scalars().all()
@@ -320,7 +326,10 @@ def purge_kb(db: Session, tenant_id: str, kb_id: str) -> None:
         _llama_engine().purge_kb(db, tenant_id, kb_id)
         return
     store = build_vector_store(db)
-    store.delete_by_kb(tenant_id, kb_id)
+    try:
+        store.delete_by_kb(tenant_id, kb_id)
+    except Exception as exc:  # noqa: BLE001 - 向量清理失败不能连累知识库删除
+        logger.warning("向量清理失败（已跳过，SQLite 侧照常删除）kb=%s：%s", kb_id, exc)
     for row in db.execute(
         select(Chunk).where(Chunk.tenant_id == tenant_id, Chunk.kb_id == kb_id)
     ).scalars().all():

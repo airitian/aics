@@ -583,6 +583,10 @@ def delete_doc(
     kb = scope.get(KnowledgeBase, doc.kb_id)
     if kb is not None:
         kb.total_bytes = max(0, kb.total_bytes - doc.size_bytes)
+    # 资产行没有对 documents 的外键约束（按 doc_id 弱关联），必须显式清理，
+    # 否则文档删了、图片记录还在，列表里出现「幽灵图片」（与 delete_kb 同理）
+    for asset in scope.list(DocumentAsset, doc_id=doc_id):
+        scope.db.delete(asset)
     # 原文件与抽出的图片一起清掉 —— 留着只会占磁盘，且没有正文对应的图是死数据
     docstore.remove_doc(tenant.id, doc_id)
     scope.db.delete(doc)
