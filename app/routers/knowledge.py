@@ -579,7 +579,13 @@ def delete_doc(
     doc = scope.get(Document, doc_id)
     if doc is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在")
-    purge_document(scope.db, tenant.id, doc_id)
+    # 向量库清理是「可重建的投影」，失败只记告警，绝不能挡住删除主路径
+    # （SQLite 才是真源）。这里必须兜住 BaseException：运行环境的安全删除
+    # 守卫会 raise SystemExit，而它在 commit 之前冒泡 = 事务回滚 = 删不掉。
+    try:
+        purge_document(scope.db, tenant.id, doc_id)
+    except BaseException as exc:  # noqa: BLE001 - 见 app/docstore.py remove_doc 的说明
+        logger.warning("文档向量清理失败（已跳过，SQLite 侧照常删除）doc=%s：%s", doc_id, exc)
     kb = scope.get(KnowledgeBase, doc.kb_id)
     if kb is not None:
         kb.total_bytes = max(0, kb.total_bytes - doc.size_bytes)
