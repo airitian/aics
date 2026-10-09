@@ -20,10 +20,10 @@ qdrant-client>=1.9
 # RAG_ENGINE=llama 时需要（LlamaIndex 0.14 标准化引擎：QdrantVectorStore + JiebaBM25 + RRF 融合）。
 # 仅当 .env 设 RAG_ENGINE=llama 且 VECTOR_BACKEND=qdrant 才需要；legacy 引擎不需要，可跳过。
 jieba>=0.42
-bm25s>=0.5
+bm25s>=0.3
 llama-index>=0.14,<0.15
-llama-index-vector-stores-qdrant>=0.3
-llama-index-retrievers-bm25>=0.3
+llama-index-vector-stores-qdrant
+llama-index-retrievers-bm25
 
 # 生产可选（按 VECTOR_BACKEND / 数据库选用，不装不影响 db / qdrant 后端运行）
 psycopg[binary]>=3.1        # PostgreSQL（Neon）必装
