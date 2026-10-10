@@ -3,15 +3,17 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app import audit, docimage, docstore, rag, vision
 from app.config import settings
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.deps import client_ip, get_scope, get_tenant, require_roles
 from app.models import (
     AiEmployee,
@@ -26,7 +28,7 @@ from app.models import (
     UserRole,
 )
 from app.rag import purge_document, purge_kb
-from app.scoping import TenantScope
+from app.scoping import TenantScope, add_scoped
 from app.schemas import KbIn, SearchTestIn
 from app.textparse import ParseError, parse_document
 from app.utils import new_id
@@ -35,6 +37,139 @@ logger = logging.getLogger("aics.knowledge")
 
 router = APIRouter(prefix="/api", tags=["knowledge"])
 editor = require_roles(UserRole.TENANT_ADMIN, UserRole.CONFIG_EDITOR)
+
+
+# --------------------------------------------------------------------------- #
+# 短写事务
+#
+# 为什么入库链路必须自己管事务，而不是沿用请求作用域那个 session：
+#
+# SQLite 是**单写者**模型，`PRAGMA busy_timeout=8000`（8 秒）只能兜住抖动，
+# 兜不住"锁被持有几分钟"。而入库链路上有三处远程调用，每处都可能耗时几十秒：
+#   1. vision.describe_many   —— 逐图调视觉模型
+#   2. embed_texts            —— 按 EMBED_BATCH 分批，实测每批 1~30 秒 + 3 次重试
+#   3. store.upsert           —— 向量库（Qdrant Cloud 在公网）
+#
+# 只要这些慢调用被夹在一个未提交的写事务中间，锁就一直被这个请求独占，
+# 期间任何并发写（另一个上传、员工 PATCH、审计落库）都会在 8 秒后
+# 抛 `sqlite3.OperationalError: database is locked` → 路由层 500。
+#
+# 所以这里的规矩是：**慢调用一律在事务外跑，写入各自用独立短事务。**
+# 写锁的持有时间从"分钟"降到"毫秒"，并发写自然就进不进来了。
+# --------------------------------------------------------------------------- #
+@contextmanager
+def short_write() -> Iterator[Session]:
+    """独立会话的短写事务：正常结束即提交，异常回滚，**绝不跨越慢调用**。"""
+    db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _insert_document_row(
+    *,
+    tenant_id: str,
+    kb_id: str,
+    filename: str,
+    ext: str,
+    size: int,
+) -> tuple[str | None, str]:
+    """校验并落 Document 行（status=processing），**全程在一个短事务内**。
+
+    去重 / 文档数上限 / 容量上限三项校验搬进事务里一起判，有两个原因：
+    1. 它们依赖"上一个文件已经落库"才准确。拆成独立事务后如果沿用请求开始时
+       的快照，同一次请求里传两个同名文件就会双双通过校验、重复入库。
+    2. 顺带把「读-判-写」变成原子的，消掉并发上传的 TOCTOU：
+       两个请求同时判断"没有同名文档"然后各自 INSERT 的竞态。
+       去重靠的是 (kb_id, filename, size_bytes)，没有唯一索引兜底。
+
+    Returns:
+        ``(doc_id, "")`` 表示已落库；``(None, 错误文案)`` 表示被拒收。
+    """
+    with short_write() as db:
+        duplicated = db.execute(
+            select(Document.id).where(
+                Document.tenant_id == tenant_id,
+                Document.kb_id == kb_id,
+                Document.filename == filename[:255],
+                Document.size_bytes == size,
+            )
+        ).scalar_one_or_none()
+        if duplicated:
+            return None, (
+                "该文件已在库中（同名且大小相同），未重复入库；"
+                "如需更新请先删除原文档，或对原文档执行「重建索引」"
+            )
+
+        # 每次重新数：本请求前面几个文件已经在自己的短事务里提交了，
+        # 请求开始时的快照到这一刻已经过期。
+        current_docs = int(
+            db.execute(
+                select(func.count())
+                .select_from(Document)
+                .where(Document.tenant_id == tenant_id, Document.kb_id == kb_id)
+            ).scalar_one()
+        )
+        if current_docs >= settings.max_docs_per_kb:
+            return None, f"该知识库文档数已达上限（{settings.max_docs_per_kb}）"
+
+        # 容量同理：kb_row 是本事务内重读的，已含前面几个文件的增量。
+        kb_row = db.execute(
+            select(KnowledgeBase).where(
+                KnowledgeBase.id == kb_id, KnowledgeBase.tenant_id == tenant_id
+            )
+        ).scalar_one_or_none()
+        if kb_row is None:
+            return None, "知识库不存在"
+        if kb_row.total_bytes + size > settings.max_kb_bytes:
+            return None, (
+                f"知识库容量将超过上限 {settings.max_kb_bytes // 1024 // 1024 // 1024}GB"
+            )
+
+        doc = Document(
+            id=new_id(),
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            filename=filename[:255],
+            ext=ext,
+            size_bytes=size,
+            status=DocStatus.PROCESSING,
+        )
+        db.add(doc)
+        # 容量随文档一起累加：每个文件一个短事务，而不是全部文件攒到最后。
+        # 这样中途崩溃时已入库的文档仍然计入容量，不会出现"占了空间却没记账"。
+        kb_row.total_bytes = max(0, kb_row.total_bytes + size)
+        return doc.id, ""
+
+
+def _finish_document(
+    *,
+    tenant_id: str,
+    doc_id: str,
+    status: str,
+    chunk_count: int,
+    error: str,
+) -> None:
+    """回写文档最终状态：独立短事务。
+
+    按 id 取对象时**必须带tenant_id**（fail-closed）——
+    这已经是独立会话，不再有 TenantScope 的兜底，漏掉租户条件就是越权写。
+    """
+    with short_write() as db:
+        row = db.execute(
+            select(Document).where(Document.id == doc_id, Document.tenant_id == tenant_id)
+        ).scalar_one_or_none()
+        if row is None:
+            # 文档在处理期间被删了：无处可写，直接返回（调用方照常记结果）
+            return
+        row.status = status
+        row.chunk_count = chunk_count
+        row.error = error
 
 
 def _kb_out(db: Session, kb: KnowledgeBase) -> dict:
@@ -236,7 +371,6 @@ def _degrades_doc_status(warnings: list[str]) -> bool:
 
 
 async def _handle_document_images(
-    scope: TenantScope,
     tenant_id: str,
     kb_id: str,
     doc_id: str,
@@ -255,6 +389,12 @@ async def _handle_document_images(
 
     ocr_pages：解析层已做整页转写的扫描页页码。这些页的内嵌图就是整页扫描图，
     内容已经抄成文字了，必须跳过 —— 否则同一页内容入库两遍，还各占一个配额。
+
+    **事务边界**：这里有两处写入（图片元数据落库、识别结果回写），两次之间夹着
+    ``vision.describe_many`` —— 逐图调视觉模型，是整条链路上最慢的一环。
+    所以两次写入各自用一个独立短事务（``short_write``），绝不让视觉调用发生在
+    未提交的事务中间。原来这里直接用请求作用域的 session，等于把视觉模型的
+    耗时全算进写锁里。
     """
     warnings: list[str] = []
     ocr_pages = ocr_pages or set()
@@ -305,8 +445,13 @@ async def _handle_document_images(
             rel_path=rel,
             status=AssetStatus.SKIPPED,
         )
-        scope.add(asset)
         assets.append(asset)
+
+    # 短事务 1：图片元数据落库后立刻提交释放写锁，再去做慢的视觉识别。
+    # add_scoped 保留了原来的归属校验（对象 tenant_id 与作用域不符则拒绝写入）。
+    with short_write() as db:
+        for asset in assets:
+            add_scoped(db, asset, tenant_id)
 
     total = len(assets)
     if not vision.enabled():
@@ -318,14 +463,28 @@ async def _handle_document_images(
 
     capped = ex.images[: max(0, settings.vision_max_images)]
     items = [(r.seq, r.data, r.mime, docimage.context_around(blocks, r.seq)) for r in capped]
+    # ↓ 慢调用：此处不持有任何写事务
     descriptions = await vision.describe_many(items)
 
-    by_seq = {a.seq: a for a in assets}
-    for seq, text in descriptions.items():
-        asset = by_seq.get(seq)
-        if asset is not None:
-            asset.description = text
-            asset.status = AssetStatus.OK
+    # 短事务 2：识别结果回写。按 (doc_id, seq) 定位而不是用上面那些 ORM 对象——
+    # 它们属于已关闭的会话（expire 之后再访问属性会触发刷新查询）。
+    by_seq = {a.seq: a.id for a in assets}
+    rows = [
+        {"id": by_seq[seq], "description": text}
+        for seq, text in descriptions.items()
+        if seq in by_seq
+    ]
+    if rows:
+        with short_write() as db:
+            for row in rows:
+                db.execute(
+                    update(DocumentAsset)
+                    .where(
+                        DocumentAsset.id == row["id"],
+                        DocumentAsset.tenant_id == tenant_id,
+                    )
+                    .values(description=row["description"], status=AssetStatus.OK)
+                )
 
     blocks, applied = docimage.apply_descriptions(blocks, ex.images, descriptions)
     if applied:
@@ -346,6 +505,25 @@ async def upload_docs(
     scope: TenantScope = Depends(get_scope),
     user: User = Depends(editor),
 ) -> dict:
+    """上传文档。**逐文件独立事务**：慢调用一律在写事务之外。
+
+    事务结构（这是本函数存在的全部理由，见``short_write`` 的注释）：
+
+    ========== ==================================== ==============
+    阶段        动作                                  是否持写锁
+    ========== ==================================== ==============
+    A校验      扩展名 / 大小（纯内存）                否
+    B 落doc   INSERT Document + 累加 kb.total_bytes   **是（毫秒级）**
+    C 解析     parse_document（线程池，CPU +磁盘）    否
+    D 图片     落图片元数据 → 视觉识别 → 回写          **是（两次，毫秒级）**
+    E 索引     切分 + 向量化 + 写向量库 + 落chunks    **是（一次，毫秒级）**
+    F 收尾     回写 doc.status / chunk_count         **是（毫秒级）**
+    ========== ==================================== ==============
+
+    原来的写法是「整个 for 循环共用一个事务，循环结束才commit」，
+    于是 C/D/E 三个阶段的全部远程调用（合计可达数分钟）都发生在写锁内，
+    并发写必然撞 ``database is locked``。
+    """
     kb = scope.get(KnowledgeBase, kb_id)
     if kb is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
@@ -356,16 +534,15 @@ async def upload_docs(
             detail=f"单次最多上传 {settings.max_upload_files} 个文件，本次提交 {len(files)} 个",
         )
 
-    current_docs = scope.count(Document, kb_id=kb_id)
     results: list[dict] = []
     accepted_docs = 0
-    added_bytes = 0
 
     for upload in files:
         filename = upload.filename or "unnamed"
         ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
         data = await upload.read()
 
+        # 阶段 A：纯内存校验，连数据库都不碰
         if ext not in settings.allowed_ext:
             results.append(
                 {
@@ -384,109 +561,104 @@ async def upload_docs(
                 }
             )
             continue
-        # 去重：同库内「同名 + 同大小」视为同一份文件，不再重复入库。
-        # 为什么必须拦：重复副本会产生**同分**的重复片段，把 top_k 召回位占满
+
+        # 阶段 B：去重 + 上限校验 + 落 doc 行，一个短事务内完成，随即释放写锁。
+        # 去重为什么必须拦：重复副本会产生**同分**的重复片段，把 top_k 召回位占满
         # （实测同一份 37 片段 PDF 传 4 次后，检索 top-5 里 4 条是同一段文字、分数一模一样），
         # 结果既浪费提示词预算，又把其他文档挤出去。
-        # 上面已有 flush()，所以同一次请求里传两遍同样能拦住。
-        duplicated = scope.db.execute(
-            select(Document.id).where(
-                Document.tenant_id == tenant.id,
-                Document.kb_id == kb_id,
-                Document.filename == filename[:255],
-                Document.size_bytes == len(data),
-            )
-        ).scalar_one_or_none()
-        if duplicated:
-            results.append(
-                {
-                    "filename": filename,
-                    "status": DocStatus.FAILED,
-                    "error": "该文件已在库中（同名且大小相同），未重复入库；如需更新请先删除原文档，或对原文档执行「重建索引」",
-                }
-            )
-            continue
-        if current_docs + accepted_docs >= settings.max_docs_per_kb:
-            results.append(
-                {
-                    "filename": filename,
-                    "status": DocStatus.FAILED,
-                    "error": f"该知识库文档数已达上限（{settings.max_docs_per_kb}）",
-                }
-            )
-            continue
-        if kb.total_bytes + added_bytes + len(data) > settings.max_kb_bytes:
-            results.append(
-                {
-                    "filename": filename,
-                    "status": DocStatus.FAILED,
-                    "error": f"知识库容量将超过上限 {settings.max_kb_bytes // 1024 // 1024 // 1024}GB",
-                }
-            )
-            continue
-
-        doc = Document(
-            id=new_id(),
+        doc_id, reject_reason = _insert_document_row(
             tenant_id=tenant.id,
             kb_id=kb_id,
-            filename=filename[:255],
+            filename=filename,
             ext=ext,
-            size_bytes=len(data),
-            status=DocStatus.PROCESSING,
+            size=len(data),
         )
-        scope.add(doc)
-        scope.db.flush()
+        if doc_id is None:
+            results.append(
+                {"filename": filename, "status": DocStatus.FAILED, "error": reject_reason}
+            )
+            continue
         accepted_docs += 1
-        added_bytes += len(data)
 
+        # 阶段 C~F：全程不持有写事务
         try:
+            # 阶段 C：解析（纯 CPU / 磁盘，线程池里跑，本来就不碰 DB）
             parsed = await run_in_threadpool(parse_document, filename, data)
+            # 阶段 D：图片元数据 + 视觉识别（内部两次短事务）
             blocks, image_warnings = await _handle_document_images(
-                scope, tenant.id, kb_id, doc.id, filename, ext, data,
+                tenant.id, kb_id, doc_id, filename, ext, data,
                 parsed.text, list(parsed.blocks), ocr_pages=parsed.ocr_pages,
             )
-            index_res = await rag.index_document(
-                scope.db,
-                tenant_id=tenant.id,
-                kb_id=kb_id,
-                doc_id=doc.id,
-                text=parsed.text,
-                blocks=blocks,
-            )
-            doc.chunk_count = index_res.chunk_count
+            # 阶段 E：切分 + 向量化 + 落 chunks。
+            # index_document 内部是「先 await 向量模型，再 db.add + flush」，
+            # 所以把写事务的开销压到 flush 之后的极短窗口；向量模型那段慢调用
+            # 发生在事务**建立之前**，不会占着写锁。
+            with short_write() as db:
+                index_res = await rag.index_document(
+                    db,
+                    tenant_id=tenant.id,
+                    kb_id=kb_id,
+                    doc_id=doc_id,
+                    text=parsed.text,
+                    blocks=blocks,
+                )
             warnings = list(parsed.warnings) + image_warnings + list(index_res.warnings)
-            doc.status = DocStatus.PARTIAL if _degrades_doc_status(warnings) else DocStatus.SUCCESS
-            doc.error = "；".join(warnings)[:2000]
+            doc_status = (
+                DocStatus.PARTIAL if _degrades_doc_status(warnings) else DocStatus.SUCCESS
+            )
+            # 阶段 F：回写最终状态（独立短事务）
+            _finish_document(
+                tenant_id=tenant.id,
+                doc_id=doc_id,
+                status=doc_status,
+                chunk_count=index_res.chunk_count,
+                error="；".join(warnings)[:2000],
+            )
             results.append(
                 {
                     "filename": filename,
-                    "doc_id": doc.id,
-                    "status": doc.status,
-                    "chunks": doc.chunk_count,
+                    "doc_id": doc_id,
+                    "status": doc_status,
+                    "chunks": index_res.chunk_count,
                     "warnings": warnings,
                 }
             )
         except ParseError as exc:
-            doc.status = DocStatus.FAILED
-            doc.error = exc.message
-            results.append({"filename": filename, "doc_id": doc.id, "status": doc.status, "error": exc.message})
+            _finish_document(
+                tenant_id=tenant.id, doc_id=doc_id, status=DocStatus.FAILED,
+                chunk_count=0, error=exc.message,
+            )
+            results.append(
+                {"filename": filename, "doc_id": doc_id, "status": DocStatus.FAILED, "error": exc.message}
+            )
         except Exception as exc:  # noqa: BLE001 - 单文件失败不能影响其他文件
             logger.exception("文档入库失败 filename=%s", filename)
-            doc.status = DocStatus.FAILED
-            doc.error = f"处理失败：{type(exc).__name__}: {exc}"
-            results.append({"filename": filename, "doc_id": doc.id, "status": doc.status, "error": doc.error})
+            err = f"处理失败：{type(exc).__name__}: {exc}"
+            # 失败也必须回写状态：否则文档会永远停在 processing，
+            # 用户在前端看到的是"一直在处理中"，既不知道成没成也没法重试。
+            _finish_document(
+                tenant_id=tenant.id, doc_id=doc_id, status=DocStatus.FAILED,
+                chunk_count=0, error=err,
+            )
+            results.append(
+                {"filename": filename, "doc_id": doc_id, "status": DocStatus.FAILED, "error": err}
+            )
 
-    kb.total_bytes = max(0, kb.total_bytes + added_bytes)
-    scope.db.commit()
-    audit.record(
-        scope.db,
-        action="kb.upload",
-        tenant_id=tenant.id,
-        target=kb_id,
-        ip=client_ip(request),
-        detail={"files": [r["filename"] for r in results], "accepted": accepted_docs},
-        commit=True,
-    )
+    # 审计：独立短事务。审计是安全留痕，绝不能因为它失败而把上面的入库结果带崩，
+    # 也不能让它去join 一个横跨数分钟的旧事务。
+    try:
+        with short_write() as db:
+            audit.record(
+                db,
+                action="kb.upload",
+                tenant_id=tenant.id,
+                target=kb_id,
+                ip=client_ip(request),
+                detail={"files": [r["filename"] for r in results], "accepted": accepted_docs},
+            )
+    except Exception:  # noqa: BLE001 - 审计失败不影响业务结果
+        logger.exception("上传审计写入失败 kb=%s", kb_id)
+
     return {"items": results, "accepted": accepted_docs, "rejected": len(results) - accepted_docs}
 
 

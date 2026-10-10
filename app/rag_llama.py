@@ -267,6 +267,14 @@ async def index_document(
     for row in chunk_rows:
         db.add(row)
     db.flush()
+    # **提交后再打向量库**（与 rag.index_document 同一处理）：
+    # llama_vector_store().add() 走 Qdrant Cloud 公网（timeout 默认 20s），
+    # 留在未提交事务里等于握着 SQLite 写锁做远程调用，并发写必然
+    # "database is locked"。提前提交把写锁压到毫秒级。
+    #
+    # 崩在中间的代价是「chunks 已落库但向量没写」：向量路查不到，但 BM25 路
+    # 语料来自 SQLite，依然能召回，对用户是降级可用；握着写锁不放则是整库不可写。
+    db.commit()
 
     nodes = [
         _make_node(

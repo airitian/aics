@@ -273,6 +273,14 @@ async def index_document(
         db.add(row)
     # 先落库再写向量索引：向量库后端需要能查到这些行（否则会重复插入同一主键）。
     db.flush()
+    # **提交后再打向量库**：store.upsert 走Qdrant Cloud（公网，timeout 默认 20s），
+    # 把它留在未提交的事务里等于握着 SQLite 写锁做远程调用 —— 并发写必然
+    # "database is locked"。这里提前提交把写锁的持有时间压到毫秒级。
+    #
+    # 提交后进程崩溃的代价是「chunks 已落库但向量没写」：检索侧向量路查不到，
+    # 但 BM25 路的语料来自 SQLite，依然能召回（见 rag_llama._bm25_retriever），
+    # 对用户是降级可用；而握着写锁不放是整库不可写。两者取其一，前者明显更优。
+    db.commit()
 
     store = build_vector_store(db, embed_res.dim or settings.embed_dim)
     store.upsert(
