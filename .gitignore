@@ -19,7 +19,12 @@ venv/
 # 临时调试产物
 _*.log
 _*.txt
+# 开头的临时调试脚本：_foo.py。但**不能**匹配 __init__.py ——
+# fnmatch 的 * 会跨过 __ 前缀，裸写 _*.py 会把所有包的 __init__.py 全部
+# 排除掉，导致干净检出的仓库缺少包标记（非显式相对导入仍可工作，
+# 但 uvicorn --reload 与部分工具链会依赖它）。先排除再放行。
 _*.py
+!__init__.py
 assets/
 tests/.tmp_assets/
 

@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import re
@@ -21,7 +22,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app import intent as intent_mod
-from app import prompting, ratelimit
+from app import prompting, ratelimit, timing
 from app.config import settings
 from app.embedding import EmbeddingUnavailable
 from app.llm import LLMUnavailable, chat
@@ -64,6 +65,10 @@ class TurnResult:
     # 早退分支（无意义输入 / 辱骂 / 广告 / 低置信追问 / 转人工 / 模型不可用）
     # 只写 SYSTEM 说明甚至什么都不写 —— 调用方据此补齐 AI 实际说的话。
     ai_saved: bool = False
+    # 本轮最终走的分支（`normal` / `handoff_lowconf` / `llm_unavailable` …）。
+    # **纯观测用**：只进耗时日志，不参与任何业务判定，也不返回给前端 ——
+    # 排查「为什么这次慢/ 为什么走了兜底」时，光有耗时数字不够，必须知道是哪条分支。
+    path: str = ""
 
 
 def _counter(value: int | None) -> int:
@@ -492,6 +497,76 @@ def _trigger_handoff(session: ChatSession, reason: str) -> None:
     session.handoff_reason = reason[:64]
 
 
+# 各分支的 path 标识。集中登记而不是散在代码里，是为了让「日志里出现过的 path 全集」
+# 有一个明确答案 —— 排障时要能反查「这个 path 对应哪段代码」。
+_PATH_CHANNEL_OFF = "channel_off"          # 渠道未启用 AI 接待
+_PATH_STOPPED = "session_stopped"         # 会话已停止（静默）
+_PATH_STOP_WINDOW = "stop_window"          # 落在停止时段（静默）
+_PATH_STOP_CONDITION = "stop_condition"    # 触发自动停止条件
+_PATH_FORCED_HANDOFF = "handoff_forced"    # 客户主动要求 / 高风险 → 强制转人工
+_PATH_ABUSE = "abuse"                     # 辱骂
+_PATH_AD = "ad"                           # 广告
+_PATH_MEANINGLESS = "meaningless"          # 无意义输入 → 追问
+_PATH_CTX_FALLBACK = "ctx_fallback"        # 上下文兜底作答
+_PATH_OVERVIEW_FALLBACK = "overview_fallback"  # 概览兜底作答
+_PATH_LOWCONF_CLARIFY = "lowconf_clarify"  # 低置信 → 追问澄清
+_PATH_LOWCONF_FALLBACK = "lowconf_fallback"  # 低置信 → 固定兜底话术
+_PATH_LOWCONF_HANDOFF = "handoff_lowconf"  # 低置信 → 转人工
+_PATH_LLM_UNAVAILABLE = "llm_unavailable"  # 模型不可用 → 告知并转人工
+_PATH_NORMAL = "normal"                    # 正常生成
+
+
+def _timed_turn(fn):
+    """给 handle_turn 套一层分阶段耗时统计（纯观测，不改任何业务行为）。
+
+    为什么用装饰器而不是在函数体里逐个 return 加日志：`handle_turn` 有 15 个
+    return 点，逐个改既啰嗦又容易漏（漏一个就等于该分支永远不出耗时日志，
+    而且这种漏在 review 时极难发现 —— 代码看起来是完整的）。
+    装饰器保证「无论从哪个 return 出去、哪怕抛异常」都会打一行摘要。
+
+    端到端 total 从**进入装饰器**开始算，覆盖 handle_turn 全部逻辑；
+    各阶段耗时由函数体里的 `timing.stage(...)` 埋点累加（rag / rag_llama 内部
+    也埋，靠 contextvars 跨模块取到同一个收集器）。
+
+    每个 return 点前仍要写 `result.path = _PATH_xxx`：装饰器只保证「一定打」，
+    「打的是哪条分支」得由分支自己申报。漏写会打成 unknown ——
+    `tests/test_timing.py::test_every_return_point_sets_a_path` 专门盯这个。
+    """
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        # prefix 是「定位这一轮是谁」用的（tenant/emp/sess/origin），与阶段计时无关，
+        # 所以在这里拼而不是塞进 stage。空值字段直接省掉，日志行短一截。
+        prefix = " ".join(
+            field
+            for field in (
+                timing.kv("tenant", getattr(kwargs.get("tenant"), "id", "")),
+                timing.kv("emp", getattr(kwargs.get("employee"), "id", "")),
+                timing.kv("sess", getattr(kwargs.get("session"), "id", "")),
+                timing.kv("origin", kwargs.get("origin") or "chat"),
+            )
+            if field
+        )
+        with timing.turn(prefix=prefix) as collector:
+            try:
+                result = await fn(*args, **kwargs)
+            except BaseException as exc:  # noqa: BLE001 - 观测层不改变异常语义，只补日志
+                # 抛异常的轮次最需要耗时信息（卡在哪一环导致 500/超时），
+                # 所以连异常路径也要出一行；path 用异常类型，便于 grep 聚类。
+                collector.path = f"exception:{type(exc).__name__}"
+                timing.log_summary(logger, collector, level=logging.ERROR)
+                raise
+            collector.path = result.path or "unknown"
+        timing.log_summary(
+            logger, collector,
+            tokens=result.tokens,
+            degraded=result.degraded,
+        )
+        return result
+
+    return wrapper
+
+
+@_timed_turn
 async def handle_turn(
     db: Session,
     *,
@@ -562,15 +637,18 @@ async def handle_turn(
         if persist:
             _add_message(db, tenant_id=tenant.id, session_id=session.id, role=MessageRole.SYSTEM,
                          content="渠道未启用 AI 接待，已转入人工队列")
+        result.path = _PATH_CHANNEL_OFF
         return result
 
     # 0.5 自动停止回复（与「未有效回答转人工」并存）。静默分支：不回复、不落消息。
     # 顺序：已停止的会话先挡掉（新会话自动恢复）→ 停止时段 → 停止条件组。
     if session.status == SessionStatus.STOPPED:
         result.status = session.status
+        result.path = _PATH_STOPPED
         return result
     if employee.stop_time_enabled and _in_stop_window(employee.stop_time_rules, _tenant_now(tenant.timezone)):
         result.status = session.status
+        result.path = _PATH_STOP_WINDOW
         return result
     if employee.stop_reply_enabled:
         # 路由层是「先 add 访客消息、再调 handle_turn」且 autoflush=False，
@@ -592,10 +670,12 @@ async def handle_turn(
                         content=closing, meta={"stop_reply": True},
                     )
                     result.ai_saved = True
+            result.path = _PATH_STOP_CONDITION
             return result
 
     # 1. 意图与风险判定
-    detected = intent_mod.detect(message)
+    with timing.stage("intent"):
+        detected = intent_mod.detect(message)
     result.intent = {
         "handoff": detected.handoff,
         "reason": detected.reason,
@@ -624,22 +704,26 @@ async def handle_turn(
                 content=f"强制转人工：{detected.reason}",
                 meta={"intent": result.intent},
             )
+        result.path = _PATH_FORCED_HANDOFF
         return result
 
     if detected.abuse:
         result.reply = "抱歉给您带来不好的体验。请您描述一下具体遇到的问题，我这边帮您处理；也可以为您转接人工客服。"
         result.status = session.status
+        result.path = _PATH_ABUSE
         return result
 
     if detected.ad:
         result.reply = "不好意思，这里只受理本业务的咨询。请问您有什么业务问题需要我帮忙？"
         result.status = session.status
+        result.path = _PATH_AD
         return result
 
     if detected.meaningless:
         result.reply = prompting.CLARIFY_REPLY
         session.clarify_count = _counter(session.clarify_count) + 1
         result.status = session.status
+        result.path = _PATH_MEANINGLESS
         return result
 
     # 2. 检索（知识库绑定优先；未绑库时才用文件级绑定）
@@ -656,8 +740,11 @@ async def handle_turn(
         kb_ids = [k for k in kb_ids_override if k]
         doc_ids = []
     else:
-        kb_ids = kb_ids_for_employee(db, tenant.id, employee.id)
-        doc_ids = [] if kb_ids else doc_ids_for_employee(db, tenant.id, employee.id)
+        # 走员工绑定的库级/文件级范围：两次都是 SQLite 查询，得算进阶段耗时 ——
+        # 租户数据量大时这里也会变慢，不能让它藏在「其它开销」里。
+        with timing.stage("kb_scope"):
+            kb_ids = kb_ids_for_employee(db, tenant.id, employee.id)
+            doc_ids = [] if kb_ids else doc_ids_for_employee(db, tenant.id, employee.id)
     hits: list[RetrievedChunk] = []
     embed_tokens = 0
     try:
@@ -694,7 +781,8 @@ async def handle_turn(
         # 答案可能就在前几轮对话里（访客提供过的信息、AI 此前回答过的内容）。
         # 有历史时先让模型基于对话记录判断；模型确认答不出来（返回哨兵
         # NO_ANSWER）才继续走追问/兜底/转人工。首轮对话（无历史）直接走原逻辑。
-        history_ctx = _recent_history(db, tenant.id, session.id) if persist else []
+        with timing.stage("history"):
+            history_ctx = _recent_history(db, tenant.id, session.id) if persist else []
         if not real_hits and history_ctx:
             ctx_system = (
                 "【对话上下文兜底】\n"
@@ -713,12 +801,13 @@ async def handle_turn(
             ctx_messages = prompting.build_messages(ctx_system, history_ctx, llm_message)
             ctx_llm = None
             try:
-                ctx_llm = await chat(
-                    ctx_messages,
-                    temperature=employee.llm_temperature / 100.0,
-                    max_tokens=employee.llm_max_tokens,
-                    profile=llm_profile,
-                )
+                with timing.stage("llm"):
+                    ctx_llm = await chat(
+                        ctx_messages,
+                        temperature=employee.llm_temperature / 100.0,
+                        max_tokens=employee.llm_max_tokens,
+                        profile=llm_profile,
+                    )
             except LLMUnavailable as exc:
                 logger.warning("上下文兜底调用失败 tenant=%s err=%s", tenant.id, exc.message)
             ratelimit.record_usage(
@@ -761,6 +850,7 @@ async def handle_turn(
                     )
                     result.ai_saved = True
                 session.last_active_at = now
+                result.path = _PATH_CTX_FALLBACK
                 return result
 
         # ---- 概览兜底：无知识命中 ≠ 知识库答不了 ----
@@ -768,9 +858,13 @@ async def handle_turn(
         # 向量+重排可能 0 命中。注入文档概览块与最相邻资料，让模型做有依据的
         # 推荐/对比；仍以 NO_ANSWER 哨兵防编造，答不了继续走原追问/兜底流程。
         if not real_hits:
-            fb_hits, fb_tokens = await _overview_fallback_hits(
-                db, tenant_id=tenant.id, kb_ids=kb_ids, doc_ids=doc_ids, query=retrieval_query
-            )
+            # 概览素材准备 = 查库捞概览块 + 一次放宽门槛的二次检索。
+            # 二次检索会再打一次 embed/向量库，所以 embed/vector_search 的
+            # calls 会变成 2—— 这正是需要看到的：这一轮比正常轮贵一倍。
+            with timing.stage("overview"):
+                fb_hits, fb_tokens = await _overview_fallback_hits(
+                    db, tenant_id=tenant.id, kb_ids=kb_ids, doc_ids=doc_ids, query=retrieval_query
+                )
             if fb_hits:
                 fb_system = prompting.build_system_prompt(
                     employee=employee,
@@ -796,12 +890,13 @@ async def handle_turn(
                 fb_messages = prompting.build_messages(fb_system, history_ctx, llm_message)
                 fb_llm = None
                 try:
-                    fb_llm = await chat(
-                        fb_messages,
-                        temperature=employee.llm_temperature / 100.0,
-                        max_tokens=employee.llm_max_tokens,
-                        profile=llm_profile,
-                    )
+                    with timing.stage("llm"):
+                        fb_llm = await chat(
+                            fb_messages,
+                            temperature=employee.llm_temperature / 100.0,
+                            max_tokens=employee.llm_max_tokens,
+                            profile=llm_profile,
+                        )
                 except LLMUnavailable as exc:
                     logger.warning("概览兜底调用失败 tenant=%s err=%s", tenant.id, exc.message)
                 ratelimit.record_usage(
@@ -844,6 +939,7 @@ async def handle_turn(
                         )
                         result.ai_saved = True
                     session.last_active_at = now
+                    result.path = _PATH_OVERVIEW_FALLBACK
                     return result
 
         # 模型基于上下文也答不出（或无历史/模型不可用）→ 原有追问/兜底/转人工流程
@@ -859,12 +955,14 @@ async def handle_turn(
                     db, tenant_id=tenant.id, session_id=session.id, role=MessageRole.SYSTEM,
                     content="低置信：追问澄清", meta={"intent": result.intent, "confidence": result.confidence},
                 )
+            result.path = _PATH_LOWCONF_CLARIFY
             return result
 
         if policy == "fallback" and hits:
             result.reply = prompting.NO_ANSWER_REPLY
             result.status = session.status
             _degrade(result, "低置信：兜底话术")
+            result.path = _PATH_LOWCONF_FALLBACK
             return result
 
         # clarify 用尽 / handoff 策略
@@ -880,34 +978,38 @@ async def handle_turn(
                 db, tenant_id=tenant.id, session_id=session.id, role=MessageRole.SYSTEM,
                 content="低置信转人工", meta={"intent": result.intent, "confidence": result.confidence},
             )
+        result.path = _PATH_LOWCONF_HANDOFF
         return result
 
     # 4. 生成回复
     # 历史窗口：默认当前会话最近 20 条（10 轮）；开启「记住客户历史」后，
     # 额外拼入该客户最近几个历史会话的消息（跨会话连贯服务）。
-    history = _recent_history(db, tenant.id, session.id) if persist else []
-    if persist and employee.memory_enabled:
-        history = _cross_session_history(
-            db, tenant_id=tenant.id, visitor_id=session.visitor_id, current_session_id=session.id
-        ) + history
-    memory = _memory_lines(db, tenant.id, session.visitor_id) if employee.memory_enabled else []
-    system_prompt = prompting.build_system_prompt(
-        employee=employee,
-        tenant_name=tenant.name,
-        hits=hits,
-        now=now,
-        visitor_language=visitor_language,
-        memory_lines=memory,
-    )
-    messages = prompting.build_messages(system_prompt, history, llm_message)
+    with timing.stage("history"):
+        history = _recent_history(db, tenant.id, session.id) if persist else []
+        if persist and employee.memory_enabled:
+            history = _cross_session_history(
+                db, tenant_id=tenant.id, visitor_id=session.visitor_id, current_session_id=session.id
+            ) + history
+        memory = _memory_lines(db, tenant.id, session.visitor_id) if employee.memory_enabled else []
+    with timing.stage("prompt_build"):
+        system_prompt = prompting.build_system_prompt(
+            employee=employee,
+            tenant_name=tenant.name,
+            hits=hits,
+            now=now,
+            visitor_language=visitor_language,
+            memory_lines=memory,
+        )
+        messages = prompting.build_messages(system_prompt, history, llm_message)
 
     try:
-        llm_result = await chat(
-            messages,
-            temperature=employee.llm_temperature / 100.0,
-            max_tokens=employee.llm_max_tokens,
-            profile=llm_profile,
-        )
+        with timing.stage("llm"):
+            llm_result = await chat(
+                messages,
+                temperature=employee.llm_temperature / 100.0,
+                max_tokens=employee.llm_max_tokens,
+                profile=llm_profile,
+            )
     except LLMUnavailable as exc:
         logger.error("模型不可用 tenant=%s err=%s", tenant.id, exc.detail)
         _trigger_handoff(session, "模型服务不可用")
@@ -921,6 +1023,7 @@ async def handle_turn(
                 db, tenant_id=tenant.id, session_id=session.id, role=MessageRole.SYSTEM,
                 content=f"模型不可用，已转人工：{exc.message}",
             )
+        result.path = _PATH_LLM_UNAVAILABLE
         return result
 
     result.reply = llm_result.text
@@ -981,6 +1084,7 @@ async def handle_turn(
         )
         result.ai_saved = True
     session.last_active_at = now
+    result.path = _PATH_NORMAL
     return result
 
 

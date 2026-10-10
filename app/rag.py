@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app import ratelimit
+from app import ratelimit, timing
 from app.config import settings
 from app.embedding import embed_query, embed_texts
 from app.models import Chunk, Document, EmployeeKbBinding
@@ -535,7 +535,11 @@ async def retrieve(
     )
     pinned_ids = {c.chunk_id for c in pinned}
 
-    vec, tokens = await embed_query(query)
+    # embedding 与向量库查询必须埋在各自真正的调用点上：在 agent 层给 retrieve
+    # 整体包一层计时，只能拿到「检索总共多久」，分不出是嵌入模型慢还是 Qdrant 慢——
+    # 而这两者的排查方向完全不同（前者看 embedding 服务，后者看 Qdrant Cloud 网络）。
+    with timing.stage("embed"):
+        vec, tokens = await embed_query(query)
     store = build_vector_store(db, len(vec))
     k = top_k or settings.top_k
     ms = min_score if min_score is not None else settings.min_score
@@ -549,19 +553,24 @@ async def retrieve(
     recall_ms = min(ms, settings.rerank_recall_min_score) if two_stage else ms
     final_ms = settings.rerank_min_score if two_stage else ms
 
+    # 每次 store.search 单独计时：多库模式下这里会连打 N 次 Qdrant，
+    # 合成一个 stage 会把「调了几次」这个关键信息抹掉（vector_search_calls 要能看出是N 次）。
     if doc_ids:
-        hits = store.search(tenant_id, vec, top_k=recall_k * 3, doc_ids=doc_ids, min_score=recall_ms)
+        with timing.stage("vector_search"):
+            hits = store.search(tenant_id, vec, top_k=recall_k * 3, doc_ids=doc_ids, min_score=recall_ms)
     elif len(kb_ids) <= 1:
-        hits = store.search(tenant_id, vec, top_k=recall_k * 3, kb_ids=kb_ids, min_score=recall_ms)
+        with timing.stage("vector_search"):
+            hits = store.search(tenant_id, vec, top_k=recall_k * 3, kb_ids=kb_ids, min_score=recall_ms)
     else:
         # 多库：每库独立取保底候选（保底 = max(per_kb_top_k, top_k/库数)），
         # 合并后交给下游 dedupe_hits 统一去重并限总量。
         per_kb = max(settings.per_kb_top_k, math.ceil(recall_k / len(kb_ids)))
         hits = []
         for kb_id in kb_ids:
-            hits.extend(
-                store.search(tenant_id, vec, top_k=per_kb * 3, kb_ids=[kb_id], min_score=recall_ms)
-            )
+            with timing.stage("vector_search"):
+                hits.extend(
+                    store.search(tenant_id, vec, top_k=per_kb * 3, kb_ids=[kb_id], min_score=recall_ms)
+                )
         hits.sort(key=lambda h: h.score, reverse=True)
     if not hits:
         merged = _service_supplement(
@@ -618,7 +627,8 @@ async def retrieve(
         out = out[:recall_k]
 
     if two_stage:
-        scores = await rerank_passages(query, [_strip_meta(c.text) for c in out])
+        with timing.stage("rerank"):
+            scores = await rerank_passages(query, [_strip_meta(c.text) for c in out])
         if scores is not None:
             ratelimit.record_usage(
                 db,

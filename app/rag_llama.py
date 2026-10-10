@@ -38,7 +38,7 @@ from llama_index.vector_stores.qdrant import QdrantVectorStore
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import ratelimit
+from app import ratelimit, timing
 from app.config import settings
 from app.embedding import embed_query, embed_texts
 from app.models import Chunk, Document
@@ -414,15 +414,16 @@ class AicsVectorRetriever(BaseRetriever):
         vec = query_bundle.embedding
         if vec is None:
             vec = _sync_embed_one(query_bundle.query_str)
-        res = _QdrantFlaky.call(
-            "query",
-            self._store.query,
-            VectorStoreQuery(
-                query_embedding=vec,
-                similarity_top_k=self._top_k,
-                filters=self._filters,
-            ),
-        )
+        with timing.stage("vector_search"):
+            res = _QdrantFlaky.call(
+                "query",
+                self._store.query,
+                VectorStoreQuery(
+                    query_embedding=vec,
+                    similarity_top_k=self._top_k,
+                    filters=self._filters,
+                ),
+            )
         out: list[NodeWithScore] = []
         for node, score in zip(res.nodes or [], res.similarities or []):
             if self._min_score > 0 and float(score) < self._min_score:
@@ -443,7 +444,8 @@ class JiebaBM25Retriever(BM25Retriever):
         spaced = QueryBundle(
             query_str=" ".join(jieba.lcut(query_bundle.query_str or ""))
         )
-        return super()._retrieve(spaced)
+        with timing.stage("bm25"):
+            return super()._retrieve(spaced)
 
 
 _BM25_CACHE: dict[tuple, Any] = {}
@@ -554,7 +556,8 @@ async def retrieve(
     )
     pinned_ids = {c.chunk_id for c in pinned}
 
-    vec, tokens = await embed_query(query)
+    with timing.stage("embed"):
+        vec, tokens = await embed_query(query)
     qb = QueryBundle(query_str=query, embedding=vec)
 
     k = top_k or settings.top_k
@@ -572,7 +575,8 @@ async def retrieve(
     # SQLite 里。BM25 路的语料来自 SQLite（本地唯一真源），向量路挂了它必须能独立顶上。
     vec_ret: AicsVectorRetriever | None = None
     try:
-        store = llama_vector_store()
+        with timing.stage("vector_search"):
+            store = llama_vector_store()
         vec_ret = AicsVectorRetriever(
             store=store, filters=_scope_filters(tenant_id, kb_ids, doc_ids),
             top_k=recall_k * 3, min_score=recall_ms,
@@ -582,9 +586,13 @@ async def retrieve(
             "llama 向量库不可用，本轮降级为纯 BM25 检索（SQLite 本地语料，不受影响）：%s", exc
         )
 
-    bm = _bm25_retriever(
-        db, tenant_id=tenant_id, kb_ids=kb_ids, doc_ids=doc_ids, top_k=recall_k
-    )
+    # BM25 路含「建/取语料索引」：首次要为整库块集跑 jieba 分词 + 建 bm25s 索引，
+    # 这是本引擎里最容易变成秒级的一步，必须单独计时（否则只会看到 fusion 很大，
+    # 却分不清是 BM25 慢还是 Qdrant 慢）。
+    with timing.stage("bm25"):
+        bm = _bm25_retriever(
+            db, tenant_id=tenant_id, kb_ids=kb_ids, doc_ids=doc_ids, top_k=recall_k
+        )
     retrievers: list[BaseRetriever] = [r for r in (vec_ret, bm) if r is not None]
     if not retrievers:
         raise VectorStoreUnavailable(
@@ -592,29 +600,34 @@ async def retrieve(
             detail="向量路与 BM25 路均不可用（llama 引擎）",
         )
 
-    if len(retrievers) == 1:
-        # 单路无需融合：少一层黑盒，也避免融合器「全有或全无」把唯一能跑的那路放大成失败
-        fused = await retrievers[0].aretrieve(qb)
-    else:
-        fusion = QueryFusionRetriever(
-            retrievers,
-            similarity_top_k=recall_k,
-            num_queries=1,          # 查询改写属 P3，标准件已就位（>1 即启用）
-            mode=FUSION_MODES.RECIPROCAL_RANK,  # 0.14 默认是 SIMPLE，必须显式指定 RRF
-            use_async=True,
-            verbose=False,
-        )
-        try:
-            fused = await fusion.aretrieve(qb)
-        except Exception as exc:  # noqa: BLE001 - 融合器任一路抛异常就炸全链，必须单路兜底
-            logger.warning("RRF 融合异常（%s），改用单路检索结果", exc)
-            fused = []
-            for retriever in retrievers:
-                try:
-                    fused = await retriever.aretrieve(qb)
-                    break
-                except Exception:  # noqa: BLE001 - 换下一路试
-                    logger.warning("单路检索失败，跳过：%s", type(retriever).__name__)
+    # fusion 只覆盖「并发召回 + RRF 合并」这一段，是检索总耗时的一部分而非超集：
+    # 上面的向量路建连探测（vector_search）与 BM25 建索引（bm25）都发生在它之外，
+    # 里面的两路查询/检索又各自在检索器内部埋点。所以日志里 fusion 可能小于
+    # vector_search，这是真实结构而非数据错误—— 判断「哪一环慢」看单个阶段即可。
+    with timing.stage("fusion"):
+        if len(retrievers) == 1:
+            # 单路无需融合：少一层黑盒，也避免融合器「全有或全无」把唯一能跑的那路放大成失败
+            fused = await retrievers[0].aretrieve(qb)
+        else:
+            fusion = QueryFusionRetriever(
+                retrievers,
+                similarity_top_k=recall_k,
+                num_queries=1,          # 查询改写属 P3，标准件已就位（>1 即启用）
+                mode=FUSION_MODES.RECIPROCAL_RANK,  # 0.14 默认是 SIMPLE，必须显式指定 RRF
+                use_async=True,
+                verbose=False,
+            )
+            try:
+                fused = await fusion.aretrieve(qb)
+            except Exception as exc:  # noqa: BLE001 - 融合器任一路抛异常就炸全链，必须单路兜底
+                logger.warning("RRF 融合异常（%s），改用单路检索结果", exc)
+                fused = []
+                for retriever in retrievers:
+                    try:
+                        fused = await retriever.aretrieve(qb)
+                        break
+                    except Exception:  # noqa: BLE001 - 换下一路试
+                        logger.warning("单路检索失败，跳过：%s", type(retriever).__name__)
 
     # 融合结果 → SQLite 双保险校验 → RetrievedChunk
     ids_hex = [_chunk_id_from_node(n.node.node_id) for n in fused]
@@ -666,7 +679,8 @@ async def retrieve(
 
     if two_stage:
         try:
-            scores = await rerank_scores(query, [_strip_meta(c.text) for c in out])
+            with timing.stage("rerank"):
+                scores = await rerank_scores(query, [_strip_meta(c.text) for c in out])
         except RerankUnavailable as exc:
             logger.warning("重排降级（%s）：回退向量粗排分（阈值 %.2f）", exc, ms)
             scores = None
@@ -710,7 +724,7 @@ async def retrieve(
                 db, tenant_id=tenant_id, kb_ids=kb_ids, doc_ids=doc_ids,
                 query=query, merged=_merge_pinned(pinned, out, k),
             ), tokens
-        coarse = await vec_ret.aretrieve(qb)
+        coarse = await vec_ret.aretrieve(qb)   # 内部自带 vector_search 计时（见 AicsVectorRetriever）
         fb: list[RetrievedChunk] = []
         fb_seen: set[str] = set()
         noise_filter_on = not _QUERY_HAS_LONG_ID.search(query)
