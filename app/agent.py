@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo
@@ -87,6 +88,71 @@ def _degrade(result: TurnResult, reason: str) -> None:
     """
     result.degraded = True
     result.degrade_reason = f"{result.degrade_reason}；{reason}" if result.degrade_reason else reason
+
+
+# --------------------------------------------------------------------------- #
+# 拒答识别：模型「礼貌地承认答不出」也算没答
+#
+# 背景（本bug 的根因）：概览/上下文兜底是「模型确认答不出才往下走」的中间层，
+# 但提示词里的 NO_ANSWER 哨兵**只是建议，不是保证**。模型经常照着概览硬凑一句
+# 客套拒答（"这个我确实查不了哈，我这边主要负责产品咨询和选购这块～"），
+# 既没返回哨兵、也没给出任何事实。旧判定只看哨兵，于是把这种回复当成
+# 「有效回答」放行 → no_answer_streak/clarify_count 被清零 → 永远进不到
+# 追问/转人工分支 → 死循环卡在概览兜底。
+#
+# 为什么不能只看「回复里没有实质内容」：正常的产品咨询回答也可能很短
+# （"净重 420g。"），按长度判会把正常短答案误杀。
+# 所以判据是「**模型自述无法回答**」——只有模型明说了「查不到/不在范围」
+# 才算拒答，正常答案不会说这种话，误判面最小。
+# --------------------------------------------------------------------------- #
+#每条都要有「自述无能」的语义。刻意不用「不支持」「没说过」这类中性词，
+# 它们会命中正常的产品问答（"这款暂不支持5G" 是有效答案）。
+_REFUSAL_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p)
+    for p in (
+        r"查不(到|了|出来)",           # 查不到 / 查不了 / 查不出来
+        r"没(有)?查到",                # 没查到 / 没有查到
+        r"无法查询|查询不了|无法查(询|证|找|到)",
+        r"没有(相关|对应|这部分|这块)?(资料|文档|信息|内容|记录)",
+        r"未找到|没有找到",
+        r"不在(我)?(这边|这里|这边范围|服务范围|职责范围|业务范围)",
+        # 必须带「我/我们」限定，否则会误杀正常答案 ——
+        # 「人为损坏不在保修范围内」是**有效**的产品答复，不能当成拒答。
+        r"(超出|不在)我(的)?(服务|职责|业务|负责)?范围",
+        r"无法(回答|作答|提供|确认|确定|判断)",
+        r"不太(方便|清楚|能)(回答|作答|提供|确认)?",
+        r"不清楚|不知道|没法(回答|确认|提供)",
+        r"没有(依据|资料|信息)(可以|能)?(回答|确认|提供)",
+        r"帮(不上|不了)(您|你)?(这个)?忙",
+        r"建议您(咨询|联系)(人工|客服|工作人员)",
+    )
+)
+
+
+def is_refusal(text: str) -> bool:
+    """判断模型回复是否属于「礼貌式拒答」（自述无法回答）。
+
+    **刻意保守**：命中任何一条即视为没答，宁可多走一次追问。
+    误判成本不对称 —— 误判成拒答只是多问一句「您是说？」，
+    漏判则会让会话永远卡在兜底里出不来（就是本bug）。
+    但也不能过宽：这些模式都要求模型**明确自述无能**，
+    正常的产品问答（哪怕答"这款不支持5G"）不会命中。
+    """
+    if not text:
+        return True
+    return any(p.search(text) for p in _REFUSAL_PATTERNS)
+
+
+def _is_real_answer(reply: str) -> bool:
+    """兜底分支的放行闸门：只有真正给出了答案才算有效回答。
+
+    哨兵 NO_ANSWER 与拒答都算「没答」。``is_refusal`` 已覆盖空串与哨兵
+    （两者都会返回 True），这里再显式排除哨兵是为了让意图不依赖正则细节。
+    """
+    reply = (reply or "").strip()
+    if not reply or reply == "NO_ANSWER":
+        return False
+    return not is_refusal(reply)
 
 
 async def _overview_fallback_hits(
@@ -437,7 +503,14 @@ async def handle_turn(
     origin: str = "chat",
     llm_profile: str = "main",
     images: list[dict] | None = None,
+    kb_ids_override: list[str] | None = None,
 ) -> TurnResult:
+    """一轮对话。
+
+    kb_ids_override：测试对话专用——显式指定本轮检索的「知识库范围」，
+    覆盖员工已配置的知识库/文件绑定。传 None（默认）时沿用员工绑定，
+    行为不变；传空列表 [] 表示「不绑定任何知识库」，检索范围为空、不召回任何内容。
+    """
     """一轮对话。
 
     images：本条消息携带的聊天图片载荷（chatimages.resolve_and_transcribe 的输出）。
@@ -575,8 +648,16 @@ async def handle_turn(
     # 用户明明"绑定了知识库"，新资料却怎么问都检索不到（实测 score=0）。
     # 库级绑定按 kb_id 过滤，库内新增文档天然纳入，符合"我绑的是这个库"的直觉。
     # 文件级只在没绑库时生效，用于逐个勾选文件的精细控制场景。
-    kb_ids = kb_ids_for_employee(db, tenant.id, employee.id)
-    doc_ids = [] if kb_ids else doc_ids_for_employee(db, tenant.id, employee.id)
+    # 测试对话可在不改动员工配置的前提下，临时指定本轮检索的「知识库范围」：
+    # 传了 kb_ids_override 就直接用它（doc_ids 清空，避免员工文件级绑定混入），
+    # 没传才回落到员工已配置的绑定。这样测试页能验证「只召回所选知识库」，
+    # 选了空列表也能验证「不绑定任何库 → 不召回任何内容」。
+    if kb_ids_override is not None:
+        kb_ids = [k for k in kb_ids_override if k]
+        doc_ids = []
+    else:
+        kb_ids = kb_ids_for_employee(db, tenant.id, employee.id)
+        doc_ids = [] if kb_ids else doc_ids_for_employee(db, tenant.id, employee.id)
     hits: list[RetrievedChunk] = []
     embed_tokens = 0
     try:
@@ -620,7 +701,14 @@ async def handle_turn(
                 "本轮没有检索到知识片段。请先查看对话记录：\n"
                 "- 若答案能从对话记录中得出（访客此前提供过的信息、或你此前回答过的内容），"
                 "请直接、如实作答，不得引入对话记录之外的任何业务事实；\n"
-                "- 若对话记录中得不出答案，只回复 NO_ANSWER 这一个词，不要有任何其他内容。"
+                "- 若对话记录中得不出答案，只回复 NO_ANSWER 这一个词，不要有任何其他内容。\n"
+                "\n"
+                "【硬性要求】严禁用客套话代替 NO_ANSWER。以下都算「答不出」，"
+                "必须只回 NO_ANSWER 一个词：说「查不到/查不了」「没有相关资料」"
+                "「不在服务范围」「不太清楚」「帮不上忙」「建议转人工」。\n"
+                "反例（这些都是错误示范，会被系统判定为未有效回答）："
+                "「这个我确实查不了哈，我这边主要负责产品咨询和选购这块～」"
+                "「抱歉，我不太清楚您具体想了解什么呢」。"
             )
             ctx_messages = prompting.build_messages(ctx_system, history_ctx, llm_message)
             ctx_llm = None
@@ -641,7 +729,16 @@ async def handle_turn(
                 origin=origin, session_id=session.id,
             )
             ctx_reply = (ctx_llm.text or "").strip() if ctx_llm else ""
-            if ctx_reply and ctx_reply != "NO_ANSWER":
+            # 只有**真正给出了答案**才放行。礼貌式拒答（"这个我确实查不了哈…"）
+            # 与哨兵 NO_ANSWER 一样都算没答 —— 放行它们会让计数被清零，
+            # 追问/转人工分支永远到不了（这正是本 bug 的死循环来源）。
+            #
+            # 刻意**不**加 `not ctx_llm.degraded` 判断：本分支原本就没有这一条，
+            # 概览兜底分支才有（见下）。补上它会改变既有行为 —— 开发模式 stub
+            # 返回的「模型未配置」文本原本能从这里放行，加了之后会掉到低置信
+            # 策略去追问/转人工，把一批「正常外语咨询不应转人工」的既有用例
+            # 打成转人工。识别拒答是本次唯一要动的事，不顺手改 degraded 语义。
+            if _is_real_answer(ctx_reply):
                 result.reply = ctx_reply
                 result.tokens = ctx_llm.total_tokens + embed_tokens
                 result.model_endpoint = ctx_llm.endpoint
@@ -685,7 +782,16 @@ async def handle_turn(
                     "\n\n【兜底说明】\n"
                     "本轮常规检索没有命中，以上片段来自知识库的文档概览与最相邻资料。\n"
                     "- 若能据此回答用户问题（如产品推荐、对比、参数查询），请直接、如实作答；\n"
-                    "- 若这些资料仍不足以回答，只回复 NO_ANSWER 这一个词，不要有任何其他内容。"
+                    "- 若这些资料仍不足以回答，只回复 NO_ANSWER 这一个词，不要有任何其他内容。\n"
+                    "\n"
+                    "【硬性要求】严禁用客套话代替 NO_ANSWER。这些片段多来自**概览与相邻资料**，"
+                    "往往只有产品名和类别，不含用户问的那个参数；此时若照着概览编一个答案，"
+                    "就是在编造。以下都算「资料不足」，必须只回 NO_ANSWER 一个词："
+                    "说「查不到/查不了」「概览里没有」「没有相关资料」「不在服务范围」"
+                    "「不太清楚」「帮不上忙」「建议转人工」。\n"
+                    "反例（错误示范，会被系统判定为未有效回答并累计未答次数）："
+                    "「这个我确实查不了哈，我这边主要负责产品咨询和选购这块～」"
+                    "「抱歉，我不太清楚您具体想了解什么呢」。"
                 )
                 fb_messages = prompting.build_messages(fb_system, history_ctx, llm_message)
                 fb_llm = None
@@ -708,7 +814,12 @@ async def handle_turn(
                 fb_reply = (fb_llm.text or "").strip() if fb_llm else ""
                 # degraded（如开发模式 stub 返回「模型未配置」）不算有效回答：
                 # 那是降级话术不是答案，必须落回原兜底流程，否则会把降级文本当答案返回。
-                if fb_reply and fb_reply != "NO_ANSWER" and fb_llm and not fb_llm.degraded:
+                #
+                # 拒答同样不算：旧判定只排除了 NO_ANSWER 哨兵，模型照着概览硬凑的
+                # 客套话（"这个我确实查不了哈，我这边主要负责产品咨询和选购这块～"）
+                # 被当成有效回答放行 → 计数清零 → 追问/转人工永远到不了 → 死循环。
+                # 这里改为「只有真正给出了答案才放行」，拒答则落回下方追问/转人工流程。
+                if _is_real_answer(fb_reply) and fb_llm and not fb_llm.degraded:
                     result.reply = fb_reply
                     result.hits = fb_hits
                     result.tokens = (fb_llm.total_tokens if fb_llm else 0) + embed_tokens + fb_tokens
@@ -874,9 +985,23 @@ async def handle_turn(
 
 
 def escalate_no_answer(session: ChatSession, employee: AiEmployee) -> bool:
-    """连续未有效回答达阈值 → 停止 AI 回复并转人工（PRD 3.1.5）。"""
+    """连续未有效回答达阈值 → 停止 AI 回复并转人工（PRD 3.1.5）。
+
+    **计数无条件累加**：本函数是「未有效回答」的唯一计数入口，
+    之前只有外层调用方（chat.py / testchat.py）在``auto_stop_enabled``
+    为真时才调用它，于是开关一关计数就永远停在 0 ——
+    运维在 UI 上把「未有效回答自动转人工」关掉后，计数连记都不记了，
+    再打开时面对的是一个"从没发生过"的会话，阈值判断完全失真。
+
+    至于「要不要真的转人工」，仍由 ``auto_stop_enabled`` 决定（见返回值）：
+    关掉它只是不让AI 静默，转人工仍可由 ``low_confidence_policy='handoff'``
+    或"连续未答满 clarify_rounds"这两条独立路径触发。这样既不废除 UI 开关，
+    又保证计数始终真实。
+    """
     session.no_answer_streak = streak = _counter(session.no_answer_streak) + 1
-    if employee.auto_stop_enabled and streak >= employee.auto_stop_threshold:
+    if not employee.auto_stop_enabled:
+        return False
+    if streak >= max(1, _counter(employee.auto_stop_threshold)):
         _trigger_handoff(session, f"连续 {employee.auto_stop_threshold} 次未有效回答")
         return True
     return False
