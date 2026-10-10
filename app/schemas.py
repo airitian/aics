@@ -461,6 +461,13 @@ class TestChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     # 对话测试也支持带图（与线上同一套图片链路，见 /api/testchat/{eid}/images）
     image_ids: list[str] = Field(default_factory=list)
+    # 测试对话的「知识库范围」：
+    # - 不传(None) → 继承员工当前绑定的知识库（绑了哪些就用哪些，解绑即不召回），
+    #   与线上生产行为一致；
+    # - 传空列表[] → 显式「不绑定任何知识库」，检索范围为空、不召回任何内容；
+    # - 传非空列表 → 只在这些知识库范围内检索，覆盖员工绑定（便于临时测别的库）。
+    # 每个 kb_id 必须属于当前租户，越权/不存在的库会被后端拒绝（400）。
+    kb_ids: list[str] | None = None
 
 
 class TestChatOut(BaseModel):
@@ -480,6 +487,11 @@ class TestChatOut(BaseModel):
     hits: list[HitOut] = Field(default_factory=list)
     top_score: float = 0.0
     confidence: int = 0
+    # 本轮实际检索的「知识库范围」，便于测试页展示与核对：
+    # scope_mode = "employee"（继承员工绑定，绑哪些用哪些）/ "selected"（测试者
+    # 显式指定了知识库）/ "none"（未绑定任何知识库，不召回任何内容）。
+    scope_kb_ids: list[str] = Field(default_factory=list)
+    scope_mode: str = "none"
     latency_ms: int = 0
     tokens: int = 0
     degraded: bool = False

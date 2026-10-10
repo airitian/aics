@@ -33,9 +33,11 @@ from app.config import TEST_CHANNEL
 from app.database import get_db
 from app.deps import get_scope, get_tenant, require_roles
 from app.docstore import read_chat_image, save_chat_image
+from app.rag import doc_ids_for_employee, kb_ids_for_employee
 from app.models import (
     AiEmployee,
     ChatImage,
+    KnowledgeBase,
     Message,
     MessageRole,
     Session as ChatSession,
@@ -298,6 +300,38 @@ async def send_message(
     row = _owned_session(scope, employee, session_id, user)
     db = scope.db
 
+    # 测试对话的「知识库范围」——默认继承员工当前绑定（绑了哪些就用哪些、
+    # 解绑了就不召回），与线上生产行为保持一致；仍允许测试者临时覆盖：
+    # - 不传 kb_ids（None） → 继承员工绑定的知识库/文件范围（scope_mode="employee"）。
+    #   员工绑了哪些库，测试就召回哪些；解绑后这些库自动退出检索范围。
+    # - 传空列表 [] → 显式「不绑定任何知识库」，检索范围为空、不召回（scope_mode="none"）。
+    # - 传非空列表 → 只在这些知识库范围内检索，覆盖员工绑定（scope_mode="selected"）。
+    # 无论哪种模式，每个 kb_id 都必须属于当前租户，越权/不存在一律 400。
+    scope_mode = "none"
+    effective_kb_ids: list[str] = []
+    kb_override: list[str] | None = None
+    if payload.kb_ids is None:
+        # 继承员工生产绑定：交给 handle_turn 按员工配置检索（含 doc_ids 兜底），
+        # 这样「解绑即不召回」与线上完全同口径。
+        emp_kb = kb_ids_for_employee(db, tenant.id, employee.id)
+        effective_kb_ids = emp_kb
+        kb_override = None
+        scope_mode = "employee" if (emp_kb or doc_ids_for_employee(db, tenant.id, employee.id)) else "none"
+    elif payload.kb_ids:
+        for kid in payload.kb_ids:
+            if scope.get(KnowledgeBase, kid) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"知识库不存在或不属于本租户：{kid}",
+                )
+        effective_kb_ids = [k for k in payload.kb_ids if k]
+        kb_override = effective_kb_ids
+        scope_mode = "selected"
+    else:
+        # 显式传空列表：本轮不绑定任何知识库
+        kb_override = []
+        scope_mode = "none"
+
     # 图片：与线上 chat 同一套校验/转写（visitor_id 是测试者自己的标识）
     image_payloads = await chatimages.resolve_and_transcribe(
         db,
@@ -348,6 +382,7 @@ async def send_message(
         origin="playground",
         llm_profile=_llm_profile(request),
         images=image_payloads or None,
+        kb_ids_override=kb_override,
     )
 
     # 与线上链路保持同一套「连续未有效回答 → 停止 AI 回复」逻辑。
@@ -407,6 +442,8 @@ async def send_message(
         ],
         top_score=round(result.top_score, 4),
         confidence=result.confidence,
+        scope_kb_ids=effective_kb_ids,
+        scope_mode=scope_mode,
         latency_ms=latency_ms,
         tokens=result.tokens,
         degraded=result.degraded,
