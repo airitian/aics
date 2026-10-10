@@ -41,3 +41,4 @@ profile_*.py
 migrate_*.py
 交接摘要*.md
 test_nameplate.png
+_sharedterm_*.png

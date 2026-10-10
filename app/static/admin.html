@@ -110,6 +110,13 @@ details[open]>summary::before{content:"▾ "}
 .estack{display:flex;flex-direction:column;gap:14px;min-width:0}
 .card-h{font-size:14px;font-weight:600;color:var(--txt);margin-bottom:12px;display:flex;align-items:center;gap:6px}
 .card-h .sub{font-weight:400;font-size:12px;color:var(--txt-dim)}
+/* 可折叠卡片：标题整行可点，右侧三角指示展开状态 */
+.card.foldable>.card-h{cursor:pointer;user-select:none;margin-bottom:12px}
+.card.foldable>.card-h::after{content:"▾";margin-left:auto;font-size:11px;color:var(--txt-dim);transition:transform .15s}
+.card.foldable.collapsed>.card-h{margin-bottom:0}
+.card.foldable.collapsed>.card-h::after{transform:rotate(-90deg)}
+.card.foldable.collapsed>.card-body{display:none}
+.card.foldable>.card-h:hover{color:var(--accent)}
 /* 设置行：左侧标签+问号，右侧徽章 / 开关 / 「设置 ›」 */
 .setrow{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 2px}
 .setrow .sw-txt{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--txt)}
@@ -173,7 +180,7 @@ pre{background:#fbfcfe;border:1px solid var(--line);border-radius:8px;padding:10
 .pm-tpl .t{font-size:13px;font-weight:600}
 .pm-tpl .d{color:var(--txt-dim);flex:1;white-space:pre-wrap;max-height:180px;overflow:hidden}
 @media (max-width:900px){.pm-body{grid-template-columns:1fr}}
-/* 知识库绑定（HelpKnow 风格） */
+/* 知识库绑定（整库勾选卡片） */
 .kb-bound{border:1px solid var(--line);border-radius:var(--radius);margin-top:6px;overflow:hidden}
 .kb-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line)}
 .kb-row:last-child{border-bottom:none}
@@ -182,12 +189,6 @@ pre{background:#fbfcfe;border:1px solid var(--line);border-radius:8px;padding:10
 .kb-row .t{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kb-row .s{font-size:11px;color:var(--txt-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kb-row>div:nth-child(2){flex:1;min-width:0}
-.kb-remove{margin-left:auto;color:var(--err);background:transparent;border:1px solid #f3c8c8;border-radius:8px;padding:3px 12px;font-size:12px;flex-shrink:0}
-.kb-remove:hover{border-color:var(--err)}
-.kb-add{margin-left:auto;color:var(--accent-2);background:transparent;border:1px solid #cfe1fb;border-radius:8px;padding:3px 12px;font-size:12px;flex-shrink:0}
-.kb-add:hover{border-color:var(--accent-2)}
-#kb-modal .modal{width:min(560px,94vw)}
-#kb-modal-list{margin-top:8px;overflow:auto;max-height:46vh}
 /* ---- 交互优化：过渡 / 动画 / 拟物开关 / 加载指示 ---- */
 button,.nav,.list-item,.chip,.kb-row,.pm-cat,.pm-tpl,input,select,textarea{transition:background .15s,border-color .15s,color .15s,box-shadow .15s}
 button:hover{box-shadow:0 1px 6px rgba(16,24,40,.08)}
@@ -280,24 +281,6 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--accent);outline-offse
     <div class="row" style="justify-content:flex-end;margin-top:12px">
       <button onclick="closePersonaModal()">取消</button>
       <button class="primary" id="pm-go" onclick="pmGenerate()">智能生成</button>
-    </div>
-  </div>
-</div>
-
-<div id="kb-modal" class="modal-mask hidden" onclick="if(event.target===this)closeDocModal()">
-  <div class="modal">
-    <div class="row" style="justify-content:space-between">
-      <h3 style="margin:0;font-size:15px">选择文件</h3>
-      <span class="row" style="gap:8px;margin:0">
-        <button class="ghost small" onclick="gotoKbPage()" style="padding:3px 10px;color:var(--accent-2)">上传文件</button>
-        <button class="ghost" onclick="closeDocModal()" style="padding:2px 10px">✕</button>
-      </span>
-    </div>
-    <input id="kb-search" placeholder="搜索文件名或知识库名称" oninput="kbSearchInput(this.value)" style="margin-top:10px">
-    <div id="kb-modal-list"></div>
-    <div class="row" style="justify-content:space-between;margin-top:12px">
-      <span class="hint" style="margin:0">新文件请到「知识库」页上传</span>
-      <button class="primary" onclick="closeDocModal()">确定</button>
     </div>
   </div>
 </div>
@@ -487,7 +470,6 @@ document.addEventListener('keydown', e=>{
     ['ask-modal', askCancel],
     ['reply-modal', ()=>closeReplyModal(false)],
     ['stop-modal', ()=>closeStopModal(false)],
-    ['kb-modal', closeDocModal],
     ['pmodal-mask', closePersonaModal],
   ]){
     const el = document.getElementById(id);
@@ -715,7 +697,6 @@ function sw(id,label,checked,tipText){
   return `<div class="setrow"><span class="sw-txt"><label for="${id}" style="margin:0;color:var(--txt);font-size:13px;cursor:pointer">${label}</label>${tipText?tip(tipText):''}</span><input type="checkbox" id="${id}" ${checked?'checked':''}></div>`;
 }
 function editorHtml(e){
-  S.editorDocIds = [...(e.doc_ids||[])];
   S.stopRules = (e.stop_time_rules||[]).map(r=>({days:[...(r.days||[])], start:r.start||'22:00', end:r.end||'08:00'}));
   S.stopState = {
     enabled:!!e.stop_reply_enabled,
@@ -735,7 +716,8 @@ function editorHtml(e){
     originPolicy:e.low_confidence_policy||'clarify',
   };
   setTimeout(()=>{
-    paintDocBound(); paintStopRules(); paintStopSummary(); paintReplySummary();
+    paintKbBound(); paintStopRules(); paintStopSummary(); paintReplySummary();
+    applyFoldState();
     // 编辑器内任何输入/勾选变化 → 防抖自动保存（弹窗里「确定」应用的状态另行显式触发）
     const card = document.getElementById('emp-editor');
     if (card){
@@ -743,7 +725,7 @@ function editorHtml(e){
       card.addEventListener('change', scheduleAutoSave);
     }
   }, 0);
-  ensureDocs().then(()=>paintDocBound());
+  ensureKbs().then(()=>paintKbBound());
   const stopOn = !!S.stopState.enabled;
   return `<div class="estack" id="emp-editor">
     <div class="card">
@@ -763,19 +745,22 @@ function editorHtml(e){
       <div id="publish-result"></div>
     </div>
 
-    <div class="card">
-      <div class="card-h">基础配置 <span class="sub">名称 · 语言 · 模型参数</span></div>
+    <div class="card foldable" data-fold="base">
+      <div class="card-h" onclick="toggleCard(this)">基础配置 <span class="sub">名称 · 语言 · 模型参数</span></div>
+      <div class="card-body">
       <div class="grid" style="grid-template-columns:1fr 1fr">
         <div><label>名称</label><input id="f-name" value="${esc(e.name)}"></div>
         <div><label>输出语言 ${tip('AI 回复使用的语言；「auto」跟随客户消息语言')}</label>
           <select id="f-lang">${['auto','zh-CN','zh-TW','en','ja','ko','ru','es','pt','fr','de','ar','th','vi','id']
             .map(l=>`<option value="${l}" ${e.output_language===l?'selected':''}>${l}</option>`).join('')}</select></div>
       </div>
-      <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:2px">
+      <!-- 温度 / 最大输出 tokens：不对外暴露，保留在 DOM 里供 collectEmployee 读取现值 -->
+      <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:2px;display:none">
         <div><label>温度 (0-100)</label><input id="f-temp" type="number" min="0" max="100" value="${e.llm_temperature}"></div>
         <div><label>最大输出 tokens</label><input id="f-maxtok" type="number" min="1" max="4096" value="${e.llm_max_tokens}"></div>
       </div>
       ${sw('f-fast','快速模式（速度优先）',e.fast_mode)}
+      </div>
     </div>
 
     <div class="card">
@@ -787,8 +772,9 @@ function editorHtml(e){
       <div class="pbar"><span class="counter" id="persona-counter"></span></div>
     </div>
 
-    <div class="card">
-      <div class="card-h">对话策略 <span class="sub">答不准时怎么兜</span></div>
+    <div class="card foldable collapsed" data-fold="policy">
+      <div class="card-h" onclick="toggleCard(this)">对话策略 <span class="sub">答不准时怎么兜</span></div>
+      <div class="card-body">
       <label>低置信度策略</label>
       <select id="f-policy">
         <option value="clarify" ${e.low_confidence_policy==='clarify'?'selected':''}>先追问澄清，超过轮次转人工</option>
@@ -818,22 +804,24 @@ function editorHtml(e){
         </span>
         <span class="setlink" onclick="openReplyModal()">设置 ›</span>
       </div>
+      </div>
     </div>
 
-    <div class="card">
-      <div class="card-h">能力开关</div>
+    <div class="card foldable collapsed" data-fold="cap">
+      <div class="card-h" onclick="toggleCard(this)">能力开关</div>
+      <div class="card-body">
       ${sw('f-memory','记住客户历史',e.memory_enabled,'开启=记住该客户跨会话的历史对话；关闭=仅记住当前会话最近 10 轮')}
       ${sw('f-group','群聊回复',e.group_reply_enabled,'依赖企微 / Telegram / WhatsApp 群聊渠道接入；本期为预留开关，渠道接入后生效')}
       ${sw('f-asr','语音识别',e.asr_enabled)}
       ${sw('f-time','获取当前时间',e.time_enabled)}
+      </div>
     </div>
 
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:10px">
-        <span style="font-weight:600;font-size:14px">知识 ${tip('两种用法二选一：① 推荐——到「知识库」页勾选整库，之后新上传的文件自动参与检索；② 这里逐个勾选文件（静态清单，新上传的文件不会自动加入，需要手动勾选）。若两边都勾了，以知识库为准。改动自动保存，「发布」后生效。')}</span>
+        <span style="font-weight:600;font-size:14px">知识库绑定 ${tip('勾选该 AI 客服要检索的整库：勾选后整库立即参与检索，之后往库里新上传的文件会自动纳入，无需逐个勾选文件。改动立即生效。')}</span>
         <span class="row" style="gap:6px;margin:0">
-          <span class="setlink" onclick="gotoKbPage()">上传文件</span>
-          <button class="ghost small" onclick="openDocModal()" style="padding:3px 10px">＋ 选择文件</button>
+          <span class="setlink" onclick="gotoKbPage()">管理知识库 / 上传文件</span>
         </span>
       </div>
       <div id="kb-bound" class="kb-bound"></div>
@@ -842,6 +830,28 @@ function editorHtml(e){
     <div class="hint" style="margin:0">改动自动保存为草稿；点「发布」并确认后才对线上生效</div>
     <div id="versions"></div>
   </div>`;
+}
+/* ---- AI 员工编辑器：卡片折叠（对话策略 / 能力开关 默认收起） ---- */
+const FOLD_KEY = 'aics.emp.fold.v1';
+function _foldStore(){
+  try { return JSON.parse(localStorage.getItem(FOLD_KEY) || '{}') || {}; }
+  catch(e){ return {}; }
+}
+function toggleCard(h){
+  const card = h && h.closest ? h.closest('.card.foldable') : null;
+  if (!card) return;
+  card.classList.toggle('collapsed');
+  const st = _foldStore();
+  st[card.dataset.fold || card.className] = !card.classList.contains('collapsed');
+  try { localStorage.setItem(FOLD_KEY, JSON.stringify(st)); } catch(e){}
+}
+/* 渲染后按用户上次的展开选择复原（未记录过的走 HTML 默认态） */
+function applyFoldState(){
+  const st = _foldStore();
+  document.querySelectorAll('.card.foldable[data-fold]').forEach(card=>{
+    const v = st[card.dataset.fold];
+    if (typeof v === 'boolean') card.classList.toggle('collapsed', !v);
+  });
 }
 function countPersona(){
   const el = document.getElementById('f-persona'); const c = document.getElementById('persona-counter');
@@ -1150,88 +1160,38 @@ function collectEmployee(){
     stop_reply_message:(S.stopState&&S.stopState.message)||'',
     stop_time_enabled:!!(S.stopState&&S.stopState.timeEnabled),
     stop_time_rules:S.stopRules||[],
-    // 不要带 kb_ids：PATCH 是「传了才覆盖」，带空数组会把知识库页勾选的库级绑定清掉，
-    // 结果 AI 只剩文件级绑定（静态快照），新上传的文档永远检索不到。
-    // 库级绑定只由知识库页的「AI 客服启用」开关负责。
-    doc_ids:(S.editorDocIds||[]).slice() };
+    // 库级绑定(kb_ids)由本页开关 / 知识库页「AI 客服启用」通过独立 PATCH 负责，
+    // 这里不要带 kb_ids（PATCH 传了才覆盖，带空数组会误清库级绑定）。
+    // 文件级绑定(doc_ids)已下线：前端不再提供「选文件」，统一只按知识库绑定。
+    // 这里固定回传空数组，把历史遗留的文件级绑定一次性清掉，避免「移除知识库后
+    // 仍能通过文件级兜底召回」的困惑。
+    doc_ids:[] }
 }
 
-/* ---- 文件级绑定（HelpKnow 风格：内联列表 + 选择弹窗） ---- */
-const DOC_STATUS = {success:'已就绪', partial:'部分成功', failed:'失败', processing:'处理中', pending:'排队中'};
-async function ensureDocs(force){
-  if(S.docAll && !force) return;
-  try{ S.docAll = (await api('/api/documents')).items; }
-  catch(e){ if(!S.docAll) S.docAll = []; }
+/* ---- 知识库绑定（整库勾选；文件级绑定已下线） ---- */
+async function ensureKbs(force){
+  if(S.kbAll && !force) return;
+  try{ S.kbAll = (await api('/api/knowledge-bases')).items; }
+  catch(e){ if(!S.kbAll) S.kbAll = []; }
 }
-function _docInfo(id){
-  const d = (S.docAll||[]).find(x=>x.id===id);
-  if(!d) return {name:'已删除文件 '+id.slice(0,8), sub:'关联数据缺失'};
-  const st = DOC_STATUS[d.status] || d.status || '';
-  const chunks = d.chunk_count>0 ? (d.chunk_count+' 段') : '';
-  return {name:d.filename, sub:[d.kb_name||'默认知识库', st, chunks].filter(Boolean).join(' · '), failed:d.status==='failed'};
-}
-function paintDocBound(){
+/* 渲染当前员工绑定了哪些知识库。每行一个开关，直接调 toggleKbBinding 走
+   独立 PATCH（不经过 collectEmployee，避免与自动保存的其它字段互相覆盖）。*/
+function paintKbBound(){
   const box = document.getElementById('kb-bound');
   if(!box) return;
-  const ids = S.editorDocIds||[];
-  box.innerHTML = ids.length ? ids.map(id=>{
-    const info = _docInfo(id);
-    const warn = info.failed ? '<div class="s" style="color:var(--err)">该文件解析失败，不会参与检索，建议移除后重建上传</div>' : '';
-    return `<div class="kb-row"><div class="kb-icon">📄</div>
-      <div><div class="t">${esc(info.name)}</div><div class="s">${esc(info.sub)}</div>${warn}</div>
-      <button class="kb-remove" onclick="removeDocBinding('${id}')">移除</button></div>`;
-  }).join('') : `<div class="kb-row"><div class="kb-icon">📄</div>
-      <div><div class="t muted">未绑定知识文件</div><div class="s">AI 将无法检索业务资料，点右上「＋ 选择文件」添加</div></div></div>`;
-}
-async function openDocModal(){
-  S.kbQuery = '';
-  const inp = document.getElementById('kb-search'); if(inp) inp.value = '';
-  await ensureDocs(true); /* 每次打开都拉最新清单，确保新上传的文件能被选中 */
-  document.getElementById('kb-modal').classList.remove('hidden');
-  paintDocModal();
-}
-function closeDocModal(){
-  document.getElementById('kb-modal').classList.add('hidden');
-  paintDocBound();
-  scheduleAutoSave();
-}
-function kbSearchInput(v){
-  S.kbQuery = (v||'').trim().toLowerCase();
-  paintDocModal();
-}
-function paintDocModal(){
-  const box = document.getElementById('kb-modal-list'); if(!box) return;
-  const ids = S.editorDocIds||[];
-  const q = S.kbQuery||'';
-  /* 解析失败的文件没有向量片段，选了也检索不到，不进可勾选列表 */
-  const failed = (S.docAll||[]).filter(d=>d.status==='failed');
-  const list = (S.docAll||[]).filter(d=>d.status!=='failed')
-    .filter(d=>!q || (d.filename||'').toLowerCase().includes(q) || (d.kb_name||'').toLowerCase().includes(q));
-  const foot = failed.length ? `<div class="muted small" style="padding:8px 14px 12px">${failed.length} 个文件解析失败（如不支持旧版 .xls），已隐藏；可到「知识库」页重建或删除</div>` : '';
-  box.innerHTML = (list.length ? list.map(d=>{
-    const bound = ids.includes(d.id);
-    const st = DOC_STATUS[d.status] || d.status || '';
-    const sub = [(d.kb_name||'默认知识库'), st, d.chunk_count>0?(d.chunk_count+' 段'):''].filter(Boolean).join(' · ');
-    return `<div class="kb-row"><div class="kb-icon">📄</div>
-      <div><div class="t">${esc(d.filename)}</div><div class="s">${esc(sub)}</div></div>
-      ${bound ? `<button class="kb-remove" onclick="docToggle('${d.id}')">移除</button>`
-              : `<button class="kb-add" onclick="docToggle('${d.id}')">添加</button>`}</div>`;
-  }).join('') : '<div class="muted small" style="padding:14px">没有匹配的文件，可到「知识库」页上传</div>') + foot;
-}
-function docToggle(id){
-  const d = (S.docAll||[]).find(x=>x.id===id);
-  if(d && d.status==='failed') return toast('该文件解析失败，不能参与检索','err');
-  if((S.editorDocIds||[]).includes(id)) S.editorDocIds = S.editorDocIds.filter(x=>x!==id);
-  else S.editorDocIds.push(id);
-  paintDocModal();
-}
-function removeDocBinding(id){
-  S.editorDocIds = (S.editorDocIds||[]).filter(x=>x!==id);
-  paintDocBound();
-  scheduleAutoSave();
+  const emp = S.employees.find(e=>e.id===S.employeeId);
+  const bound = new Set(emp ? (emp.kb_ids||[]) : []);
+  const list = S.kbAll||[];
+  box.innerHTML = list.length ? list.map(k=>`
+    <div class="kb-row"><div class="kb-icon">📚</div>
+      <div><div class="t">${esc(k.name)}</div><div class="s">${k.doc_count} 文档 · ${k.chunk_count} 片段</div></div>
+      <div class="switch" style="margin:0 0 0 auto"><input type="checkbox" ${bound.has(k.id)?'checked':''}
+        onchange="event.stopPropagation();toggleKbBinding('${k.id}',this.checked)"><label style="margin:0">${bound.has(k.id)?'已启用':'启用'}</label></div>
+    </div>`).join('')
+    : `<div class="kb-row"><div class="kb-icon">📚</div>
+        <div><div class="t muted">还没有知识库</div><div class="s">点右上「管理知识库 / 上传文件」去创建并上传资料</div></div></div>`;
 }
 function gotoKbPage(){
-  closeDocModal();
   S.page = 'knowledge'; render();
 }
 
@@ -1548,7 +1508,7 @@ async function viewKnowledge(v){
   </div>`;
 }
 /* 知识库 ↔ AI 客服的绑定开关。
-   AI 员工配置页移除后，这里是唯一能改「AI 用哪些知识库」的地方 ——
+   知识库页「AI 客服启用」与员工配置页的整库勾选共用这一处逻辑；
    没有它，上传的资料就永远检索不到。 */
 async function toggleKbBinding(kbId, enabled){
   const emp = S.employees.find(e=>e.id===S.employeeId);
@@ -1586,7 +1546,7 @@ async function uploadDocs(btn){
       if(!res.ok) throw new Error(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail));
       toast('入库完成：成功 '+data.accepted+' 个，拒绝 '+data.rejected+' 个','ok');
       (data.items||[]).filter(i=>i.status==='failed').forEach(i=>toast(i.filename+'：'+i.error,'err'));
-      S.docAll = null; /* 失效缓存，AI 客服「选择文件」弹窗下次打开拉最新 */
+      S.docAll = null; /* 失效缓存，文档列表下次拉取时刷新 */
       render();
     }catch(e){ toast(e.message,'err'); }
   }, '入库中…');
