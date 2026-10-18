@@ -8,6 +8,16 @@ import pytest
 from tests.conftest import login
 
 
+def _doc_final(client, headers, kb_id: str, doc_id: str) -> dict:
+    """上传异步化后，POST 响应只到 processing；终态从文档列表回查。
+
+    TestClient 会把 BackgroundTasks 内联跑完再返回，所以 POST 一返回
+    文档就已到达终态，这里查的是「后台跑完之后」的真实结果。
+    """
+    items = client.get(f"/api/knowledge-bases/{kb_id}/documents", headers=headers).json()["items"]
+    return next(d for d in items if d["id"] == doc_id)
+
+
 # --------------------------------------------------------------------------- #
 # 基础
 # --------------------------------------------------------------------------- #
@@ -217,15 +227,19 @@ def test_upload_and_parse_error_is_actionable(client, star):
     assert item["status"] == "failed"
     assert "不支持" in item["error"]
 
-    # 空文件
+    # 空文件：能过请求内校验，但解析阶段失败 → 后台回写 failed
     res = client.post(
         f"/api/knowledge-bases/{kb}/documents",
         headers=star,
         files={"files": ("empty.txt", b"", "text/plain")},
     )
-    assert res.json()["items"][0]["status"] == "failed"
+    empty_item = res.json()["items"][0]
+    assert empty_item["status"] == "processing", empty_item
+    empty_doc = _doc_final(client, star, kb, empty_item["doc_id"])
+    assert empty_doc["status"] == "failed", empty_doc
+    assert empty_doc["error"], "失败必须带可操作的原因"
 
-    # 正常入库
+    # 正常入库：提交即返回 processing，后台（TestClient 内联执行）到达终态
     text = "本店所有商品支持 30 天价保，价保期内降价可申请退还差价。".encode()
     res = client.post(
         f"/api/knowledge-bases/{kb}/documents",
@@ -233,8 +247,11 @@ def test_upload_and_parse_error_is_actionable(client, star):
         files={"files": ("价保政策.txt", text, "text/plain")},
     )
     item = res.json()["items"][0]
-    assert item["status"] == "success"
-    assert item["chunks"] >= 1
+    assert item["status"] == "processing", item
+    assert item["doc_id"], item
+    doc = _doc_final(client, star, kb, item["doc_id"])
+    assert doc["status"] == "success", doc
+    assert doc["chunk_count"] >= 1, doc
 
 
 def test_duplicate_upload_is_rejected(client, star):
@@ -247,8 +264,10 @@ def test_duplicate_upload_is_rejected(client, star):
         headers=star,
         files={"files": ("退货政策.txt", payload, "text/plain")},
     ).json()
-    assert first["items"][0]["status"] == "success", first
+    assert first["items"][0]["status"] == "processing", first
     assert first["accepted"] == 1
+    # 后台跑完后必须是 success（去重拦截发生在下一批的插入前，与状态机无关）
+    assert _doc_final(client, star, kb, first["items"][0]["doc_id"])["status"] == "success"
 
     # 同名 + 同大小 → 拒绝
     second = client.post(
@@ -271,7 +290,9 @@ def test_duplicate_upload_is_rejected(client, star):
         ],
     ).json()
     assert third["accepted"] == 1, third
-    assert [i["status"] for i in third["items"]] == ["success", "failed"], third
+    # 第一个进后台（processing），第二个被去重拦截（failed，请求内即时判掉）
+    assert [i["status"] for i in third["items"]] == ["processing", "failed"], third
+    assert _doc_final(client, star, kb, third["items"][0]["doc_id"])["status"] == "success"
 
     # 同名但内容不同（大小不同）不能被误伤
     diff = client.post(
@@ -285,4 +306,5 @@ def test_duplicate_upload_is_rejected(client, star):
             )
         },
     ).json()
-    assert diff["items"][0]["status"] == "success", diff
+    assert diff["items"][0]["status"] == "processing", diff
+    assert _doc_final(client, star, kb, diff["items"][0]["doc_id"])["status"] == "success"

@@ -301,10 +301,16 @@ def test_upload_docx_with_image_registers_assets(client, star, tmp_path, monkeyp
     )
     assert res.status_code == 200, res.text
     item = res.json()["items"][0]
-    assert item["status"] in ("success", "partial"), item
-    assert any("图片" in w for w in item.get("warnings", []))
-
+    assert item["status"] == "processing", item
     doc_id = item["doc_id"]
+    # 异步化后响应只到 processing，warnings 改从文档列表的 error 字段回查
+    # （后端把 warnings 以「；」连接落进 error，前端轮询展示用的就是它）
+    listing = client.get(
+        f"/api/knowledge-bases/{kb_id}/documents", headers=star
+    ).json()["items"]
+    doc_row = next(d for d in listing if d["id"] == doc_id)
+    assert doc_row["status"] in ("success", "partial"), doc_row
+    assert "图片" in (doc_row.get("error") or ""), doc_row
     res = client.get(f"/api/documents/{doc_id}/assets", headers=star)
     assert res.status_code == 200
     assets = res.json()["items"]

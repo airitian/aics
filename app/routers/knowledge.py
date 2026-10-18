@@ -6,7 +6,16 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -500,29 +509,36 @@ async def _handle_document_images(
 async def upload_docs(
     kb_id: str,
     request: Request,
+    background: BackgroundTasks,
     files: list[UploadFile] = File(...),
     tenant: Tenant = Depends(get_tenant),
     scope: TenantScope = Depends(get_scope),
     user: User = Depends(editor),
 ) -> dict:
-    """上传文档。**逐文件独立事务**：慢调用一律在写事务之外。
+    """上传文档。**提交即返回，入库在后台跑**（异步化 2026-10 改造）。
 
-    事务结构（这是本函数存在的全部理由，见``short_write`` 的注释）：
+    为什么异步：阶段 C~F（解析 → 图片识别 → 向量化 → 回写）含大量远程调用，
+    18,483 块的费率表实测要跑约 10 分钟。同步链路下前端一直挂着，
+    刷新/断网就前功尽弃（用户已真实踩过两次）。现在 handler 只做
+    「纯内存校验 + 落 doc 行」，读完文件立即返回，重活交给
+    ``_process_uploaded_documents``，前端轮询文档状态即可。
 
-    ========== ==================================== ==============
-    阶段        动作                                  是否持写锁
-    ========== ==================================== ==============
-    A校验      扩展名 / 大小（纯内存）                否
-    B 落doc   INSERT Document + 累加 kb.total_bytes   **是（毫秒级）**
-    C 解析     parse_document（线程池，CPU +磁盘）    否
-    D 图片     落图片元数据 → 视觉识别 → 回写          **是（两次，毫秒级）**
-    E 索引     切分 + 向量化 + 写向量库 + 落chunks    **是（一次，毫秒级）**
-    F 收尾     回写 doc.status / chunk_count         **是（毫秒级）**
-    ========== ==================================== ==============
+    事务结构（阶段划分与 ``short_write`` 的注释一致）：
 
-    原来的写法是「整个 for 循环共用一个事务，循环结束才commit」，
-    于是 C/D/E 三个阶段的全部远程调用（合计可达数分钟）都发生在写锁内，
-    并发写必然撞 ``database is locked``。
+    ========== ==================================== ============== ===========
+    阶段        动作                                  是否持写锁      执行位置
+    ========== ==================================== ============== ===========
+    A校验      扩展名 / 大小（纯内存）                否              请求内
+    B 落doc   INSERT Document + 累加 kb.total_bytes   **是（毫秒级）** 请求内
+    C 解析     parse_document（线程池，CPU +磁盘）    否              后台
+    D 图片     落图片元数据 → 视觉识别 → 回写          **是（两次）**  后台
+    E 索引     切分 + 向量化 + 写向量库 + 落chunks    **是（一次）**  后台
+    F 收尾     回写 doc.status / chunk_count         **是（毫秒级）** 后台
+    ========== ==================================== ============== ===========
+
+    被拒收的文件（格式/大小/去重/上限）仍在请求内判完并即时返回 failed；
+    只有通过阶段 B 的文件才进后台。**任何一个后台异常都必须回写 failed**，
+    绝不留 processing 僵死（见 ``_process_uploaded_documents``）。
     """
     kb = scope.get(KnowledgeBase, kb_id)
     if kb is None:
@@ -536,6 +552,7 @@ async def upload_docs(
 
     results: list[dict] = []
     accepted_docs = 0
+    pending: list[dict] = []
 
     for upload in files:
         filename = upload.filename or "unnamed"
@@ -580,69 +597,18 @@ async def upload_docs(
             continue
         accepted_docs += 1
 
-        # 阶段 C~F：全程不持有写事务
-        try:
-            # 阶段 C：解析（纯 CPU / 磁盘，线程池里跑，本来就不碰 DB）
-            parsed = await run_in_threadpool(parse_document, filename, data)
-            # 阶段 D：图片元数据 + 视觉识别（内部两次短事务）
-            blocks, image_warnings = await _handle_document_images(
-                tenant.id, kb_id, doc_id, filename, ext, data,
-                parsed.text, list(parsed.blocks), ocr_pages=parsed.ocr_pages,
-            )
-            # 阶段 E：切分 + 向量化 + 落 chunks。
-            # index_document 内部是「先 await 向量模型，再 db.add + flush」，
-            # 所以把写事务的开销压到 flush 之后的极短窗口；向量模型那段慢调用
-            # 发生在事务**建立之前**，不会占着写锁。
-            with short_write() as db:
-                index_res = await rag.index_document(
-                    db,
-                    tenant_id=tenant.id,
-                    kb_id=kb_id,
-                    doc_id=doc_id,
-                    text=parsed.text,
-                    blocks=blocks,
-                )
-            warnings = list(parsed.warnings) + image_warnings + list(index_res.warnings)
-            doc_status = (
-                DocStatus.PARTIAL if _degrades_doc_status(warnings) else DocStatus.SUCCESS
-            )
-            # 阶段 F：回写最终状态（独立短事务）
-            _finish_document(
-                tenant_id=tenant.id,
-                doc_id=doc_id,
-                status=doc_status,
-                chunk_count=index_res.chunk_count,
-                error="；".join(warnings)[:2000],
-            )
-            results.append(
-                {
-                    "filename": filename,
-                    "doc_id": doc_id,
-                    "status": doc_status,
-                    "chunks": index_res.chunk_count,
-                    "warnings": warnings,
-                }
-            )
-        except ParseError as exc:
-            _finish_document(
-                tenant_id=tenant.id, doc_id=doc_id, status=DocStatus.FAILED,
-                chunk_count=0, error=exc.message,
-            )
-            results.append(
-                {"filename": filename, "doc_id": doc_id, "status": DocStatus.FAILED, "error": exc.message}
-            )
-        except Exception as exc:  # noqa: BLE001 - 单文件失败不能影响其他文件
-            logger.exception("文档入库失败 filename=%s", filename)
-            err = f"处理失败：{type(exc).__name__}: {exc}"
-            # 失败也必须回写状态：否则文档会永远停在 processing，
-            # 用户在前端看到的是"一直在处理中"，既不知道成没成也没法重试。
-            _finish_document(
-                tenant_id=tenant.id, doc_id=doc_id, status=DocStatus.FAILED,
-                chunk_count=0, error=err,
-            )
-            results.append(
-                {"filename": filename, "doc_id": doc_id, "status": DocStatus.FAILED, "error": err}
-            )
+        # 阶段 C~F 不在请求里跑：登记进 pending，响应即时返回 processing。
+        # data 阶段 A 已整份读进内存，传给后台任务不会额外占内存。
+        pending.append({"doc_id": doc_id, "filename": filename, "ext": ext, "data": data})
+        results.append(
+            {"filename": filename, "doc_id": doc_id, "status": DocStatus.PROCESSING}
+        )
+
+    # 后台逐文件入库：响应已发出，客户端断连/刷新都不再中断处理
+    if pending:
+        background.add_task(
+            _process_uploaded_documents, tenant_id=tenant.id, kb_id=kb_id, items=pending
+        )
 
     # 审计：独立短事务。审计是安全留痕，绝不能因为它失败而把上面的入库结果带崩，
     # 也不能让它去join 一个横跨数分钟的旧事务。
@@ -660,6 +626,83 @@ async def upload_docs(
         logger.exception("上传审计写入失败 kb=%s", kb_id)
 
     return {"items": results, "accepted": accepted_docs, "rejected": len(results) - accepted_docs}
+
+
+async def _process_uploaded_documents(
+    *, tenant_id: str, kb_id: str, items: list[dict]
+) -> None:
+    """后台逐文件执行上传链路的阶段 C~F（解析 → 图片 → 索引 → 回写状态）。
+
+    这是原同步 handler 的重活部分，原样搬过来（事务结构与
+    ``short_write`` 的约定完全一致：慢调用一律在写事务之外）。
+    与请求 handler 的分工：handler 只做纯内存校验 + 落 doc 行，
+    读完文件立即返回；本函数在响应发出后运行，客户端断连、
+    页面刷新、切走标签页都不再中断入库 —— 异步化的全部目的。
+
+    健壮性要求（比同步版更不能丢）：
+    - 单文件失败不影响同批其他文件（与原语义一致）；
+    - **任何异常都必须回写 failed** —— 后台任务里没人盯着，
+      漏一个 processing 僵死，用户看到的是"永远在处理中"，
+      既不知道成没成也没法重试；
+    - 全部用 ``short_write`` 自建会话，不依赖请求作用域。
+
+    已知限制：dev 的 WatchFiles reload 会杀进程内后台任务
+    （重启后 processing 的文档不会自愈，需手动「重建索引」或重传）。
+    """
+    for item in items:
+        doc_id = item["doc_id"]
+        filename = item["filename"]
+        try:
+            # 阶段 C：解析（纯 CPU / 磁盘，线程池里跑，本来就不碰 DB）
+            parsed = await run_in_threadpool(parse_document, filename, item["data"])
+            # 阶段 D：图片元数据 + 视觉识别（内部两次短事务）
+            blocks, image_warnings = await _handle_document_images(
+                tenant_id, kb_id, doc_id, filename, item["ext"], item["data"],
+                parsed.text, list(parsed.blocks), ocr_pages=parsed.ocr_pages,
+            )
+            # 阶段 E：切分 + 向量化 + 落 chunks。
+            # index_document 内部是「先 await 向量模型，再 db.add + flush」，
+            # 所以把写事务的开销压到 flush 之后的极短窗口；向量模型那段慢调用
+            # 发生在事务**建立之前**，不会占着写锁。
+            with short_write() as db:
+                index_res = await rag.index_document(
+                    db,
+                    tenant_id=tenant_id,
+                    kb_id=kb_id,
+                    doc_id=doc_id,
+                    text=parsed.text,
+                    blocks=blocks,
+                )
+            warnings = list(parsed.warnings) + image_warnings + list(index_res.warnings)
+            doc_status = (
+                DocStatus.PARTIAL if _degrades_doc_status(warnings) else DocStatus.SUCCESS
+            )
+            # 阶段 F：回写最终状态（独立短事务）
+            _finish_document(
+                tenant_id=tenant_id,
+                doc_id=doc_id,
+                status=doc_status,
+                chunk_count=index_res.chunk_count,
+                error="；".join(warnings)[:2000],
+            )
+            logger.info(
+                "后台入库完成 doc=%s filename=%s status=%s chunks=%s",
+                doc_id, filename, doc_status, index_res.chunk_count,
+            )
+        except ParseError as exc:
+            _finish_document(
+                tenant_id=tenant_id, doc_id=doc_id, status=DocStatus.FAILED,
+                chunk_count=0, error=exc.message,
+            )
+        except Exception as exc:  # noqa: BLE001 - 单文件失败不能影响其他文件
+            logger.exception("后台入库失败 doc=%s filename=%s", doc_id, filename)
+            err = f"处理失败：{type(exc).__name__}: {exc}"
+            # 失败也必须回写状态：否则文档会永远停在 processing，
+            # 用户在前端看到的是"一直在处理中"，既不知道成没成也没法重试。
+            _finish_document(
+                tenant_id=tenant_id, doc_id=doc_id, status=DocStatus.FAILED,
+                chunk_count=0, error=err,
+            )
 
 
 @router.get("/documents/{doc_id}/assets")

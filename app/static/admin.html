@@ -383,7 +383,9 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--accent);outline-offse
 <script>
 const S = { token: localStorage.getItem('aics_token') || '', me: null, page: 'overview',
             employeeId: null, kbId: null, employees: [], kbs: [], meta: null,
-            tcSession: null, tcMsgs: [], tcBusy: false };
+            tcSession: null, tcMsgs: [], tcBusy: false,
+            /* 后台上传轮询：pending 为 doc_id→文件名，timer 为轮询定时器 */
+            docWatch: {timer:null, pending:new Map()} };
 
 function toast(msg, kind){
   const el = document.createElement('div');
@@ -517,6 +519,7 @@ async function doLogin(){
 }
 function logout(){
   S.token=''; localStorage.removeItem('aics_token');
+  stopDocWatch();
   document.getElementById('app').style.display='none';
   document.getElementById('boot-splash').style.display='none';
   if (window.AUTH_DISABLED){
@@ -1485,7 +1488,7 @@ async function viewKnowledge(v){
     </div>
     <div>
       <div class="card">
-        <h3>上传文档 ${tip('解析失败的单个文件不会影响其他文件')}</h3>
+        <h3>上传文档 ${tip('提交后立即返回，文件在后台解析入库，完成后右上角通知；单个文件失败不影响其他文件')}</h3>
         <input type="file" id="files" multiple>
         <div class="row" style="margin-top:10px"><button class="primary" onclick="uploadDocs(this)">上传并入库</button></div>
       </div>
@@ -1540,9 +1543,13 @@ async function deleteKb(){
   if(!S.kbId) return; if(!await askConfirm('删除知识库', '确认删除该知识库及其全部文档与向量？此操作不可恢复。', {danger:true})) return;
   try{ await api('/api/knowledge-bases/'+S.kbId,{method:'DELETE'}); S.kbId=null; toast('已删除','ok'); render(); }catch(e){ toast(e.message,'err'); }
 }
+/* 上传改异步后的提交逻辑：请求只做「校验 + 落 doc 行」，秒回；
+   解析/向量化在后台跑，这里轮询文档状态，终态逐条 toast。
+   failed 是请求内即时判掉的（格式/大小/去重/上限），不需要等。 */
 async function uploadDocs(btn){
   const input = document.getElementById('files');
   if(!input.files.length) return toast('请先选择文件','err');
+  if(!S.kbId) return toast('请先选择知识库','err');
   await withBusy(btn, async()=>{
     const fd = new FormData();
     for(const f of input.files) fd.append('files', f);
@@ -1550,12 +1557,70 @@ async function uploadDocs(btn){
       const res = await fetch('/api/knowledge-bases/'+S.kbId+'/documents',{method:'POST',headers:{'Authorization':'Bearer '+S.token},body:fd});
       const data = await res.json();
       if(!res.ok) throw new Error(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail));
-      toast('入库完成：成功 '+data.accepted+' 个，拒绝 '+data.rejected+' 个','ok');
-      (data.items||[]).filter(i=>i.status==='failed').forEach(i=>toast(i.filename+'：'+i.error,'err'));
-      S.docAll = null; /* 失效缓存，文档列表下次拉取时刷新 */
+      const items = data.items||[];
+      const processing = items.filter(i=>i.status==='processing');
+      items.filter(i=>i.status==='failed').forEach(i=>toast(i.filename+'：'+i.error,'err'));
+      if(processing.length){
+        toast('已提交 '+processing.length+' 个文件，后台入库中，完成后会通知','ok');
+        input.value = '';
+        watchDocs(processing.map(i=>({doc_id:i.doc_id, filename:i.filename})));
+      }else if(items.length){
+        toast('提交完成：'+data.accepted+' 个进入后台，'+data.rejected+' 个被拒绝','ok');
+      }
       render();
     }catch(e){ toast(e.message,'err'); }
-  }, '入库中…');
+  }, '提交中…');
+}
+/* 轮询知识库文档列表直到被关注的文档全部到达终态。
+   大文件（向量化可能几分钟）靠这个让用户看到进度；轮询失败静默重试，
+   文档被删/超出时限也会收尾，不会永远挂着一个定时器。 */
+function watchDocs(items){
+  if(!items || !items.length) return;
+  for(const it of items) S.docWatch.pending.set(it.doc_id, it.filename);
+  if(S.docWatch.timer) return; /* 已有轮询在跑，合并关注列表即可 */
+  const deadline = Date.now() + 30*60*1000; /* 30 分钟兜底：极端大文件也不会无限等 */
+  let fails = 0;
+  S.docWatch.timer = setInterval(async ()=>{
+    if(!S.docWatch.pending.size){ stopDocWatch(); return; }
+    if(Date.now() > deadline){
+      const left = [...S.docWatch.pending.values()];
+      stopDocWatch();
+      toast('后台入库耗时过长（'+left.join('、')+'），请刷新页面查看状态','err');
+      return;
+    }
+    try{
+      const r = await api('/api/knowledge-bases/'+S.kbId+'/documents');
+      fails = 0;
+      let changed = false;
+      const seen = new Set();
+      for(const d of (r.items||[])){
+        seen.add(d.id);
+        if(!S.docWatch.pending.has(d.id) || d.status==='processing') continue;
+        S.docWatch.pending.delete(d.id);
+        changed = true;
+        if(d.status==='failed') toast(d.filename+' 入库失败：'+(d.error||''),'err');
+        else if(d.status==='partial') toast(d.filename+' 已入库（'+d.chunk_count+' 片段，有警告）：'+(d.error||''),'ok');
+        else toast(d.filename+' 入库成功，'+d.chunk_count+' 个片段','ok');
+      }
+      /* 列表里已经没有的文档 = 处理期间被删了，不能继续傻等 */
+      for(const [id, name] of S.docWatch.pending){
+        if(!seen.has(id)){
+          S.docWatch.pending.delete(id);
+          changed = true;
+          toast(name+' 已被删除，后台任务取消关注','err');
+        }
+      }
+      if(changed && S.page==='knowledge') render();
+    }catch(e){
+      /* 401 已被 api() 处理（登出）；这里只计网络抖动，连续 15 次约 30 秒后提示 */
+      if(++fails >= 15){ stopDocWatch(); toast('文档状态刷新失败，请手动刷新页面：'+e.message,'err'); }
+    }
+    if(!S.docWatch.pending.size) stopDocWatch();
+  }, 2000);
+}
+function stopDocWatch(){
+  if(S.docWatch.timer){ clearInterval(S.docWatch.timer); S.docWatch.timer = null; }
+  S.docWatch.pending.clear();
 }
 async function toggleDoc(id, enabled){
   try{ await api('/api/documents/'+id+'?enabled='+enabled,{method:'PATCH'}); render(); }catch(e){ toast(e.message,'err'); }

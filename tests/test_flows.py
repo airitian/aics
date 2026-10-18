@@ -556,7 +556,9 @@ def _upload_txt(client, headers, kb_id: str, name: str, body: str) -> str:
     )
     assert res.status_code == 200, res.text
     item = res.json()["items"][0]
-    assert item["status"] in ("success", "partial"), item
+    # 异步化：提交即返回 processing，TestClient 内联跑完后台任务，
+    # 调用方拿 doc_id 去做后续绑定/检索，届时文档已在终态。
+    assert item["status"] == "processing", item
     return item["doc_id"]
 
 
