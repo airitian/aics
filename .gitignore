@@ -35,11 +35,14 @@ _junit.xml
 *.bak*
 
 # ---- 仓库只保留可运行的项目代码；以下随本地开发环境维护，不入库 ----
-tests/
+# tests/ 只入库测试代码（*.py）与 pytest.ini；夹具（txt/png/docx/db）按约定留本地
+tests/*
+!tests/*.py
+tests/_*.py
+!tests/__init__.py
 cmds/
 eval/
 docs/
-pytest.ini
 smoke_test.py
 verify_*.py
 profile_*.py
