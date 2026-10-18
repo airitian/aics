@@ -195,6 +195,9 @@ class AiEmployee(Base, TimestampMixin):
 
     # ---- AI 回复设置：拟人 / 延迟 / 拆分 ----
     humanize_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # 网页内容提取（Fetch）：访客发来商品链接时抓正文，作为参考资料注入 prompt。
+    # 与 settings.web_fetch_enabled 是「且」的关系：总开关关闭时本项无效。
+    web_fetch_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     reply_delay_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 旧字段：固定延迟，取区间 max 同步
     # 延迟回复区间（秒）：每次回复在 [min, max] 内随机；min=max=0 表示关闭
     reply_delay_min: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

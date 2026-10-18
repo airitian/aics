@@ -22,7 +22,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app import intent as intent_mod
-from app import prompting, ratelimit, timing
+from app import prompting, ratelimit, timing, webfetch
 from app.config import settings
 from app.embedding import EmbeddingUnavailable
 from app.llm import LLMUnavailable, chat
@@ -726,6 +726,30 @@ async def handle_turn(
         result.path = _PATH_MEANINGLESS
         return result
 
+    # 1.5 网页内容提取（Fetch）：访客发来链接时抓正文
+    #
+    # 位置是刻意选的：意图判定之后（辱骂/广告/强制转人工的轮次直接早退，
+    # 不白抓一次外部 HTTP）、检索之前（抓到的品牌+型号要拼进检索查询——
+    # 「TX-500 无线网桥」比「这个是不是你家的」好检索得多，也要拼进
+    # LLM 看到的用户消息）。三段消费与聊天图片完全同构。
+    web_pages: list[webfetch.FetchedPage] = []
+    web_note = ""
+    if settings.web_fetch_enabled and getattr(employee, "web_fetch_enabled", False):
+        with timing.stage("webfetch"):
+            web_pages = await webfetch.fetch_for_message(message)
+        web_note = webfetch.build_note(web_pages)
+        web_query_extra = webfetch.build_query_extra(web_pages)
+        if web_note:
+            llm_message = f"{message}\n\n{web_note}"
+        if web_query_extra:
+            retrieval_query = f"{retrieval_query}\n{web_query_extra}"
+        if web_pages:
+            logger.info(
+                "网页抓取 tenant=%s emp=%s links=%d ok=%d",
+                tenant.id, employee.id, len(web_pages),
+                sum(1 for p in web_pages if p.ok),
+            )
+
     # 2. 检索（知识库绑定优先；未绑库时才用文件级绑定）
     #
     # 为什么库级优先：文件级绑定是**静态快照**——上传新文档后不会自动进入列表，
@@ -772,7 +796,13 @@ async def handle_turn(
     result.confidence = intent_mod.confidence_from_score(result.top_score)
 
     # 3. 无命中 / 低置信 → 走配置的兜底策略
-    low_confidence = (not real_hits) or result.confidence < employee.confidence_threshold
+    # 例外：有成功抓取的网页内容时不走兜底。访客问「这是不是你家的商品」而
+    # 知识库没有该商品时，正确行为是模型基于网页内容判断并如实说明
+    # （不是 / 无法确认），走追问转人工等于把最简单的咨询推给人。
+    low_confidence = (
+        (not real_hits or result.confidence < employee.confidence_threshold)
+        and not webfetch.has_content(web_pages)
+    )
     if low_confidence:
         policy = employee.low_confidence_policy
         clarify_count = _counter(session.clarify_count)
@@ -999,6 +1029,7 @@ async def handle_turn(
             now=now,
             visitor_language=visitor_language,
             memory_lines=memory,
+            has_web_pages=bool(web_note),
         )
         messages = prompting.build_messages(system_prompt, history, llm_message)
 

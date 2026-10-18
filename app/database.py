@@ -1,6 +1,7 @@
 """数据库连接与会话。默认 SQLite 开箱即用，生产换 PostgreSQL 即可。"""
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -8,6 +9,8 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import settings
+
+logger = logging.getLogger("aics.db")
 
 
 class Base(DeclarativeBase):
@@ -94,10 +97,21 @@ def _ensure_schema() -> None:
 
 
 # create_all 只建新表、不会给已有表加新列。这里维护「后加的列」清单，
-# 启动时对已存在的表逐列 ALTER ADD（仅 SQLite；换 PG 时走正式迁移）。
+# 启动时对已存在的表逐列 ALTER ADD。
+#
+# **SQLite 与 PostgreSQL 都生效**（项目没有 alembic，这就是正式迁移机制）：
+# 2026-10-18 事故——web_fetch_enabled 加进 ORM 后 dev 连的 PG 表里没这一列，
+# 任何查 ai_employees 的请求全部 500。旧代码在这里 `if not is_sqlite: return`
+# 把 PG 整个跳过，等于 ORM 与 PG schema 静默漂移，启动自检也发现不了。
+# 现在两种方言统一走 inspect + ALTER ADD：
+# - inspect().get_columns() 对两种方言都可用；
+# - 清单里的 DDL（BOOLEAN/INTEGER/VARCHAR/TEXT + 常量 DEFAULT）两者都认；
+# - PG 11+ 对「带常量默认值」的 ADD COLUMN 是 O(1) 元数据操作，不重写表。
+# 换 Oracle 等不支持online DDL 的库时再回来加方言判断。
 _NEW_COLUMNS: dict[str, list[tuple[str, str, str]]] = {
     "ai_employees": [
         ("humanize_enabled", "BOOLEAN", "0"),
+        ("web_fetch_enabled", "BOOLEAN", "1"),
         ("reply_delay_seconds", "INTEGER", "0"),
         ("reply_delay_min", "INTEGER", "0"),
         ("reply_delay_max", "INTEGER", "0"),
@@ -116,12 +130,24 @@ _NEW_COLUMNS: dict[str, list[tuple[str, str, str]]] = {
 }
 
 
+def _alter_sql(table: str, name: str, ddl: str, default: str, dialect: str) -> str:
+    """按方言生成 ADD COLUMN 语句。
+
+    SQLite 动态类型，`DEFAULT 1` 加到 boolean 列毫无意见；PG 严格类型检查，
+    boolean 列的默认值必须是 `true`/`false`，给 1 直接 DatatypeMismatch
+    （2026-10-18 实测）。清单里的 DDL/默认值是当年按 SQLite 写的，
+    这里在 PG 侧做转换，不动清单本身（它是 SQLite 的真相来源）。
+    """
+    if dialect.startswith("postgres") and ddl.strip().upper() == "BOOLEAN":
+        default = "true" if default.strip("'\"") in ("1", "true", "TRUE") else "false"
+    return f"ALTER TABLE {table} ADD COLUMN {name} {ddl} NOT NULL DEFAULT {default}"
+
+
 def _ensure_new_columns() -> None:
-    if not settings.is_sqlite:
-        return
     from sqlalchemy import inspect, text
 
     insp = inspect(engine)
+    dialect = engine.dialect.name
     with engine.begin() as conn:
         for table, cols in _NEW_COLUMNS.items():
             if table not in insp.get_table_names():
@@ -130,6 +156,9 @@ def _ensure_new_columns() -> None:
             for name, ddl, default in cols:
                 if name in existing:
                     continue
-                conn.execute(
-                    text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl} NOT NULL DEFAULT {default}")
-                )
+                try:
+                    conn.execute(text(_alter_sql(table, name, ddl, default, dialect)))
+                    logger.info("已补列 %s.%s", table, name)
+                except Exception:
+                    # 并发启动/权限不足时不能拦住启动：记日志，让请求去报错暴露
+                    logger.exception("补列失败 %s.%s（ORM 与库 schema 可能不一致）", table, name)

@@ -43,6 +43,7 @@ SNAPSHOT_FIELDS = [
     "asr_enabled", "time_enabled", "low_confidence_policy", "confidence_threshold",
     "clarify_rounds", "llm_temperature", "llm_max_tokens", "channel_switch",
     "humanize_enabled", "reply_delay_seconds", "reply_delay_min", "reply_delay_max",
+    "web_fetch_enabled",
     "split_reply_enabled", "split_reply_max", "split_reply_interval_ms",
     "split_interval_min_ms", "split_interval_max_ms",
     "stop_reply_enabled", "stop_reply_rounds", "stop_condition_groups", "stop_reply_message",

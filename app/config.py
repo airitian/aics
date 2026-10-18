@@ -171,6 +171,29 @@ class Settings(BaseSettings):
     # 单条消息最多带几张图 —— 每张都要过一次视觉模型，张数直接乘在回合延迟上
     chat_image_max_per_message: int = 3
 
+    # ---------- 网页内容提取（Fetch）：访客发来链接时抓正文 ----------
+    # 场景：「帮我看看这个链接里的商品是不是你家的」。抓取结果按不可信
+    # 外部资料注入 prompt（与聊天图片同一模式），不进知识库。
+    # 总开关关掉时，agent 整段跳过，员工级开关也随之失效。
+    # SSRF 防护（协议白名单 / DNS 后地址段校验 / 重定向逐跳复检）在
+    # app/webfetch.py 里强制执行，不随配置关闭——这是公网部署的底线。
+    web_fetch_enabled: bool = True
+    # 单条消息最多抓几个链接：每个都是一次外部 HTTP，多了直接乘在回合延迟上
+    web_fetch_max_urls: int = 3
+    # 同时抓取的并发数。商品站普遍慢，1 会把「两个链接」串成两倍等待
+    web_fetch_concurrency: int = 2
+    # 单次抓取总超时（秒）。连接超时另按 min(5, 该值) 收紧
+    web_fetch_timeout: float = 12.0
+    # 重定向上限。商品联盟链接动辄 302 三四跳，给到 5
+    web_fetch_max_redirects: int = 5
+    # 响应体硬上限（字节）：超过即断，防无限增长/超大页面吃内存
+    web_fetch_max_bytes: int = 3 * 1024 * 1024
+    # 注入 prompt 的正文上限（字符）。6000 约覆盖一个商品详情页的主体
+    web_fetch_max_chars: int = 6000
+    # 拼进检索查询的网页内容上限（字符）。查询越长越稀释 embedding，
+    # 只取标题+开头，把「品牌+型号」带进检索就够
+    web_fetch_query_chars: int = 400
+
     # ---------- RAG ----------
     chunk_size: int = 600
     chunk_overlap: int = 100

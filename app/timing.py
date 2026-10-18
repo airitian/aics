@@ -60,6 +60,7 @@ from typing import Iterator
 # 字段跳来跳去会让肉眼比对失效。
 STAGE_KEYS: tuple[str, ...] = (
     "intent",         # 意图与风险判定（纯 CPU）
+    "webfetch",       # 网页内容提取：访客发来链接时抓正文（外部 HTTP，可并发多链接）
     "kb_scope",       # 取员工绑定的知识库/文件范围（查库）
     "embed",          # embedding 模型远程调用（rag / rag_llama 内部）
     "vector_search",  # 向量库查询（Qdrant Cloud 公网）

@@ -151,6 +151,9 @@ class EmployeeIn(BaseModel):
     doc_ids: list[str] = Field(default_factory=list)
     # ---- AI 回复设置 ----
     humanize_enabled: bool = False
+    # 网页内容提取（Fetch）：访客发来商品链接时抓正文注入 prompt。默认开，
+    # 员工级可关；settings.web_fetch_enabled 总开关关闭时此项无效。
+    web_fetch_enabled: bool = True
     reply_delay_seconds: int = Field(default=0, ge=0, le=60)  # 旧字段：固定延迟，取区间 max 同步
     reply_delay_min: int = Field(default=0, ge=0, le=60)
     reply_delay_max: int = Field(default=0, ge=0, le=60)
@@ -247,6 +250,7 @@ class EmployeePatchIn(BaseModel):
     doc_ids: list[str] | None = None
     # ---- AI 回复设置 ----
     humanize_enabled: bool | None = None
+    web_fetch_enabled: bool | None = None
     reply_delay_seconds: int | None = Field(default=None, ge=0, le=60)
     reply_delay_min: int | None = Field(default=None, ge=0, le=60)
     reply_delay_max: int | None = Field(default=None, ge=0, le=60)

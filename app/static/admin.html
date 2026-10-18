@@ -333,6 +333,7 @@ input[type=checkbox]:focus-visible{outline:2px solid var(--accent);outline-offse
     </div>
     <div style="overflow:auto;max-height:62vh;margin-top:6px">
       <div class="switch" style="margin:8px 0"><input type="checkbox" id="rp-humanize"><label for="rp-humanize" style="margin:0">拟人回复（语气更像真人客服）</label><span class="tip" tabindex="0" data-tip="开启后自动注入拟人化表达要求；品牌语气、客服身份请在「人设」中补充。">?</span></div>
+      <div class="switch" style="margin:8px 0"><input type="checkbox" id="rp-webfetch"><label for="rp-webfetch" style="margin:0">网页内容提取（访客发链接时自动抓取）</label><span class="tip" tabindex="0" data-tip="访客发来商品链接（如「帮我看看这个是不是你家的」）时，自动抓取网页标题与正文作为参考资料作答；仅支持 http/https，内网地址会被拒绝，抓取失败会如实告知客户链接打不开。">?</span></div>
 
       <label style="margin-top:6px">AI 延迟回复时间 <span class="tip" tabindex="0" data-tip="每次回复在区间内随机延迟；等待期内客户连发的消息会合并成一条统一回复。0 ~ 0 表示关闭。">?</span></label>
       <div class="row" style="align-items:center;gap:8px;margin-top:4px">
@@ -706,6 +707,7 @@ function editorHtml(e){
   };
   S.replyState = {
     humanize:!!e.humanize_enabled,
+    webFetch:e.web_fetch_enabled!==false,
     delayMin:e.reply_delay_min??0,
     delayMax:e.reply_delay_max??0,
     split:!!e.split_reply_enabled,
@@ -1145,6 +1147,7 @@ function collectEmployee(){
     asr_enabled:document.getElementById('f-asr').checked,
     time_enabled:document.getElementById('f-time').checked,
     humanize_enabled:!!(S.replyState&&S.replyState.humanize),
+    web_fetch_enabled:!!(S.replyState&&S.replyState.webFetch),
     reply_delay_min:(S.replyState&&S.replyState.delayMin)||0,
     reply_delay_max:(S.replyState&&S.replyState.delayMax)||0,
     reply_delay_seconds:(S.replyState&&S.replyState.delayMax)||0,
@@ -1204,6 +1207,7 @@ function paintReplySummary(){
   parts.push(r.delayMax>0 ? `延迟 ${r.delayMin}~${r.delayMax} 秒` : '延迟关闭');
   parts.push(r.split ? `拆分≤${r.splitMax} 条` : '拆分关闭');
   parts.push('拟人'+(r.humanize?'开':'关'));
+  parts.push('网页提取'+(r.webFetch?'开':'关'));
   parts.push('兜底'+(r.fallback?'开':'关'));
   el.textContent = parts.join(' · ');
 }
@@ -1213,6 +1217,7 @@ function openReplyModal(){
   S.replyState.fallback = S.replyState.originPolicy === 'fallback';
   S.replyBackup = _replyBackup();
   document.getElementById('rp-humanize').checked = S.replyState.humanize;
+  document.getElementById('rp-webfetch').checked = S.replyState.webFetch !== false;
   document.getElementById('rp-dmin').value = S.replyState.delayMin;
   document.getElementById('rp-dmax').value = S.replyState.delayMax;
   document.getElementById('rp-split').checked = S.replyState.split;
@@ -1236,6 +1241,7 @@ function closeReplyModal(commit){
   if(commit){
     const r = S.replyState;
     r.humanize = document.getElementById('rp-humanize').checked;
+    r.webFetch = document.getElementById('rp-webfetch').checked;
     r.delayMin = _num('rp-dmin', 0, 60, 0);
     r.delayMax = Math.max(r.delayMin, _num('rp-dmax', 0, 60, 0));
     r.split = document.getElementById('rp-split').checked;
